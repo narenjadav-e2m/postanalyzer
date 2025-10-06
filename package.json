@@ -1,0 +1,29 @@
+{
+  "name": "postanalyzer",
+  "version": "1.0.0",
+  "description": "WordPress plugin for automated blog post QA based on SOPs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run watch\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "watch": "nodemon --watch src --watch ../ --ext js,jsx,css,php --ignore build --exec \"npm run build\""
+  },
+  "devDependencies": {
+    "@fontsource-variable/exo-2": "^5.2.8",
+    "@vitejs/plugin-react": "^5.0.3",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.7",
+    "vite": "^7.1.7"
+  },
+  "dependencies": {
+    "@fancyapps/ui": "^6.0.34",
+    "@tailwindcss/vite": "^4.1.13",
+    "jquery": "^3.7.1",
+    "nice-select2": "^2.4.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tailwindcss": "^4.1.13"
+  }
+}

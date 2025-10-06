@@ -1,0 +1,223 @@
+@import '@fontsource-variable/exo-2';
+@import "tailwindcss";
+
+@theme {
+  --font-exo: 'Exo 2 Variable', sans-serif;
+}
+
+#postanalyzer-root,
+#postanalyzer {
+  @apply relative text-base font-exo;
+}
+
+#postanalyzer-root a:focus,
+#postanalyzer-root a:focus-visible,
+#postanalyzer-root button:focus,
+#postanalyzer-root button:focus-visible,
+#postanalyzer-root input:focus,
+#postanalyzer-root input:focus-visible,
+#postanalyzer-root select:focus,
+#postanalyzer-root select:focus-visible,
+#postanalyzer-root textarea:focus,
+#postanalyzer-root textarea:focus-visible {
+  @apply outline-none shadow-none;
+}
+
+.postanalyzer-wrapper {
+  @apply relative p-6 rounded shadow-md mx-auto bg-white min-h-[86dvh] overflow-hidden;
+}
+
+/* Header Start */
+
+#postanalyzer-root button,
+#postanalyzer-root a {
+  @apply cursor-pointer transition duration-300 ease-in-out;
+}
+
+#postanalyzer-root .head-title {
+  @apply !text-3xl !font-bold !text-blue-600 !tracking-[1px] !p-0;
+}
+
+#postanalyzer-root .head-text {
+  @apply text-base text-gray-600 !mt-1 !mb-0;
+}
+
+#postanalyzer-root .nice-select:not(.open) * {
+  @apply !pointer-events-none;
+}
+
+#postanalyzer-root .nice-select .current {
+  @apply block overflow-hidden;
+}
+
+#postanalyzer-root .nice-select .nice-select-dropdown {
+  @apply max-h-[60dvh] !mt-3;
+}
+
+#postanalyzer-root .nice-select .nice-select-search-box {
+  @apply pointer-events-auto;
+}
+
+#postanalyzer-root .optgroup {
+  @apply !py-3 !px-2 bg-gray-100;
+}
+
+/* Header End */
+
+/* Result Start */
+
+#postanalyzer-root .result-container .title {
+  @apply !text-2xl !font-bold !text-blue-600 !p-0 !m-0;
+}
+
+#postanalyzer-root .result-container .card {
+  @apply mb-4 p-4 border rounded !w-full !max-w-full;
+}
+
+#postanalyzer-root .result-container .card .card-title {
+  @apply font-semibold !text-2xl !mt-0 !mb-3 !pb-3 border-b-[1px] border-gray-300;
+}
+
+#postanalyzer-root .result-container .card .featured-img {
+  @apply flex flex-row items-start justify-between gap-5;
+}
+
+#postanalyzer-root .result-container .card .featured-img .card-img {
+  @apply max-w-[500px] w-full h-auto mb-2 rounded aspect-[1280/400] object-cover;
+}
+
+#postanalyzer-root .result-container .card .attached-images {
+  @apply grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4;
+}
+
+#postanalyzer-root .result-container .card .attached-img {
+  @apply flex flex-row items-start justify-between gap-5 border-gray-300 border-1 rounded p-2;
+}
+
+#postanalyzer-root .result-container .card .attached-img .card-img {
+  @apply max-w-[200px] min-w-[200px] w-full h-auto mb-2 rounded aspect-square object-cover;
+}
+
+/* Result End */
+
+/* Settings Start */
+
+#postanalyzer-root .settings-button {
+  @apply bg-gray-100 hover:bg-blue-600 text-blue-600 hover:text-white p-2 rounded cursor-pointer;
+}
+
+#postanalyzer-root .settings-button svg {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+#postanalyzer-root .settings-button:hover svg {
+  @apply rotate-360;
+}
+
+#postanalyzer-root .settings-modal-overlay {
+  @apply absolute inset-0 bg-[#00000080] flex items-start justify-center z-50 pt-20;
+}
+
+#postanalyzer-root .settings-modal-container {
+  @apply bg-white rounded-lg p-6 max-w-md w-full mx-4 relative;
+}
+
+#postanalyzer-root .settings-modal-close {
+  @apply absolute top-4 right-4 text-gray-400 hover:text-gray-600;
+}
+
+#postanalyzer-root .settings-modal-title {
+  @apply text-xl font-semibold mb-4 mt-0;
+}
+
+#postanalyzer-root .settings-form-group {
+  @apply mb-4;
+}
+
+#postanalyzer-root .settings-form-group-last {
+  @apply mb-6;
+}
+
+#postanalyzer-root .settings-form-label {
+  @apply block text-sm font-medium text-gray-700 mb-2;
+}
+
+#postanalyzer-root .settings-input-wrapper {
+  @apply relative;
+}
+
+#postanalyzer-root .settings-form-input {
+  @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
+}
+
+#postanalyzer-root .settings-help-button {
+  @apply absolute right-2 top-[50%] transform-[translateY(-50%)] text-gray-400 hover:text-gray-600;
+}
+
+#postanalyzer-root .settings-help-popover {
+  @apply mt-2 p-4 bg-blue-50 border border-blue-200 rounded-md text-sm;
+}
+
+#postanalyzer-root .settings-help-title {
+  @apply font-semibold !mt-0 mb-1;
+}
+
+#postanalyzer-root .settings-help-list {
+  @apply list-decimal ml-4 space-y-1;
+}
+
+#postanalyzer-root .settings-help-link {
+  @apply text-blue-600 hover:underline;
+}
+
+#postanalyzer-root .settings-help-close {
+  @apply text-blue-600 hover:underline text-xs;
+}
+
+#postanalyzer-root .settings-form-select {
+  @apply border p-2 flex-1 !text-base px-4 py-1 w-full border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
+}
+
+#postanalyzer-root .settings-message {
+  @apply mb-4 p-3 rounded-md text-sm;
+}
+
+#postanalyzer-root .settings-message-success {
+  @apply bg-green-50 text-green-800 border border-green-200;
+}
+
+#postanalyzer-root .settings-message-error {
+  @apply bg-red-50 text-red-800 border border-red-200;
+}
+
+#postanalyzer-root .settings-actions {
+  @apply flex justify-end gap-3;
+}
+
+#postanalyzer-root .settings-button-cancel {
+  @apply px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors;
+}
+
+#postanalyzer-root .settings-button-save {
+  @apply px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors;
+}
+
+/* Settings End */
+
+/* Aniamtion Start */
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pa-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Aniamtion End */
