@@ -1,5 +1,13 @@
 <?php
-class PostAnalyzer_REST
+
+namespace PostAnalyzer\API;
+
+defined('ABSPATH') || exit;
+
+/**
+ * REST endpoint that analyzes a post and returns metadata, SEO info, images, and suggestions.
+ */
+class AnalyzePost
 {
 
     public function __construct()
@@ -170,8 +178,8 @@ class PostAnalyzer_REST
             'url_suggestions' => $url_suggestions,
             'ai_suggestions' => $ai_suggestions,
         ];
-
-        $response = recursive_html_entity_decode($response);
+        
+        $response = \PostAnalyzer\Plugin::instance()->recursive_html_entity_decode($response);
 
         return rest_ensure_response($response);
     }
@@ -434,5 +442,3 @@ class PostAnalyzer_REST
         return $url;
     }
 }
-
-new PostAnalyzer_REST();

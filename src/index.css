@@ -24,7 +24,8 @@
 }
 
 .postanalyzer-wrapper {
-  @apply relative p-6 rounded shadow-md mx-auto bg-white min-h-[86dvh] overflow-hidden;
+  @apply p-6 rounded shadow-md mx-auto bg-white overflow-hidden overflow-y-scroll;
+  height: clamp(700px, 85dvh, 100vh);
 }
 
 /* Header Start */
@@ -34,12 +35,28 @@
   @apply cursor-pointer transition duration-300 ease-in-out;
 }
 
+#postanalyzer-root .sticky-head {
+  @apply sticky top-0 bg-white z-10;
+}
+
+#postanalyzer-root .postanalyzer-wrapper.modal-open {
+  @apply !overflow-hidden;
+}
+
+#postanalyzer-root .sticky-head:before {
+  @apply absolute top-6/12 left-0 w-full h-[125%] bg-white -z-10 transform-[translateY(-55%)] content-[''];
+}
+
+#postanalyzer-root .sticky-head::after{
+  @apply absolute bottom-[-10px] left-0 w-full h-[1px] bg-gray-200 -z-10 content-[''];
+}
+
 #postanalyzer-root .head-title {
   @apply !text-3xl !font-bold !text-blue-600 !tracking-[1px] !p-0;
 }
 
 #postanalyzer-root .head-text {
-  @apply text-base text-gray-600 !mt-1 !mb-0;
+  @apply text-base text-gray-600 !mt-1 !mb-2;
 }
 
 #postanalyzer-root .nice-select:not(.open) * {
@@ -115,11 +132,11 @@
 }
 
 #postanalyzer-root .settings-modal-overlay {
-  @apply absolute inset-0 bg-[#00000080] flex items-start justify-center z-50 pt-20;
+  @apply absolute inset-0 bg-[#0000002b] flex items-start justify-center z-50 backdrop-blur-[2px] pt-10;
 }
 
 #postanalyzer-root .settings-modal-container {
-  @apply bg-white rounded-lg p-6 max-w-md w-full mx-4 relative;
+  @apply bg-white rounded-lg p-6 max-w-lg w-11/12 mx-4 relative;
 }
 
 #postanalyzer-root .settings-modal-close {
@@ -147,7 +164,7 @@
 }
 
 #postanalyzer-root .settings-form-input {
-  @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
+  @apply w-full px-3 py-2 !pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
 }
 
 #postanalyzer-root .settings-help-button {
@@ -191,7 +208,7 @@
 }
 
 #postanalyzer-root .settings-actions {
-  @apply flex justify-end gap-3;
+  @apply flex justify-start gap-3;
 }
 
 #postanalyzer-root .settings-button-cancel {
@@ -200,6 +217,46 @@
 
 #postanalyzer-root .settings-button-save {
   @apply px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors;
+}
+
+#postanalyzer-root .settings-radio-group {
+  @apply flex flex-row gap-2 mt-2;
+}
+
+#postanalyzer-root .settings-radio-label {
+  @apply flex items-center gap-2 cursor-pointer;
+}
+
+#postanalyzer-root .settings-radio-input {
+  @apply w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 !m-0;
+}
+
+#postanalyzer-root .settings-radio-input:checked {
+  @apply !border-blue-500 focus:ring-blue-500;
+}
+
+#postanalyzer-root .settings-radio-input:checked::before {
+  @apply !bg-blue-600 max-md:!m-[0.1566rem];
+}
+
+#postanalyzer-root .settings-radio-text {
+  @apply text-sm text-gray-700;
+}
+
+#postanalyzer-root .settings-message-info {
+  @apply bg-blue-50 text-blue-800 border border-blue-200;
+}
+
+#postanalyzer-root .settings-message-spinner {
+  @apply inline-block ml-2;
+}
+
+#postanalyzer-root .settings-spinner-icon {
+  @apply animate-spin h-4 w-4 inline;
+}
+
+#postanalyzer-root .settings-message {
+  @apply flex items-center;
 }
 
 /* Settings End */

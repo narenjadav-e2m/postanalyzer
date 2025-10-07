@@ -1,0 +1,15 @@
+{
+    "name": "e2msolutions/postanalyzer",
+    "description": "PostAnalyzer plugin",
+    "type": "wordpress-plugin",
+    "version": "1.0.0",
+    "require": {
+        "guzzlehttp/guzzle": "^7.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "PostAnalyzer\\API\\": "api/",
+            "PostAnalyzer\\": "includes/"
+        }
+    }
+}
