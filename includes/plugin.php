@@ -25,6 +25,7 @@ class Plugin
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_action('init', [$this, 'load_endpoints']);
+        add_action('admin_bar_menu', [$this, 'add_analyze_post_admin_bar'], 100);
     }
 
     public static function instance(): self
@@ -49,7 +50,7 @@ class Plugin
         add_menu_page(
             __('PostAnalyzer', 'postanalyzer'),
             __('PostAnalyzer', 'postanalyzer'),
-            'manage_options',
+            'edit_posts',
             self::SLUG,
             [$this, 'render_admin_page'],
             'dashicons-search',
@@ -59,7 +60,7 @@ class Plugin
 
     public function render_admin_page(): void
     {
-        if (! current_user_can('manage_options')) {
+        if (! current_user_can('edit_posts')) {
             wp_die(esc_html__('Insufficient permissions', 'postanalyzer'));
         }
         echo '<div class="wrap"><div id="postanalyzer-root" aria-live="polite"></div></div>';
@@ -96,6 +97,7 @@ class Plugin
                     'restUrl' => esc_url_raw(rest_url('postanalyzer/v1/')),
                     'nonce'   => wp_create_nonce('wp_rest'),
                     'siteUrl' => esc_url_raw(get_site_url()),
+                    'user_level' => current_user_can('manage_options') ? 'admin' : 'editor',
                 ]
             );
         } else {
@@ -105,6 +107,27 @@ class Plugin
             });
         }
     }
+
+
+    public function add_analyze_post_admin_bar($wp_admin_bar)
+    {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $args = array(
+            'id'    => 'analyze_post',
+            'title' => 'Analyze Post',
+            'href'  => admin_url('admin.php?page=postanalyzer'),
+            'meta'  => array(
+                'class' => 'analyze-post-admin-bar',
+                'title' => 'Analyze Post Page'
+            )
+        );
+
+        $wp_admin_bar->add_node($args);
+    }
+
 
     public function load_endpoints(): void
     {

@@ -279,21 +279,8 @@ function SettingsModal({ isOpen, onClose, users = [] }) {
         // Small delay to show the saving message
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Only save non-sensitive data to localStorage
-        const localSettings = {
-          ai_platform: selectedPlatform,
-          author_id: selectedAuthor,
-          updated_at: new Date().toISOString()
-        };
-        localStorage.setItem('postanalyzer_settings', JSON.stringify(localSettings));
-
         // Show final success message
         setSavedMessage(data.message || 'Settings saved successfully!');
-
-        // Show additional info if available
-        if (data.data.api_key_info) {
-          console.log('API Key Info:', data.data.api_key_info);
-        }
 
         setTimeout(() => {
           setSavedMessage('');
@@ -774,56 +761,56 @@ function PostAnalyzer() {
 
   return (
     <div className={`postanalyzer-wrapper ${showSettings ? 'modal-open' : ''}`} ref={fancyboxRootRef}>
-      <div className='sticky-head'>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="head-title">PostAnalyzer</h1>
-          </div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="head-title">PostAnalyzer</h1>
+        </div>
+        {postanalyzerWP.user_level === 'admin' && (
           <div>
             <button onClick={handleSettingsClick} className="settings-button" title="Settings" aria-label="Open Settings" disabled={loadingPosts}>
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             </button>
           </div>
-        </div>
-
-        <p className="head-text">{loadingPosts ? 'Loading available posts...' : hasPosts ? 'Choose a post to generate an automated QA & SEO report.' : 'No posts are currently available for analysis.'}</p>
-
-        {/* Show empty state when no posts are available */}
-        {!loadingPosts && !hasPosts && !error && (
-          <EmptyState loading={loadingPosts} />
         )}
-
-        {/* Only show controls when posts are available */}
-        {hasPosts && (
-          <>
-            <div className="flex items-center gap-3 mb-2 max-w-3xl">
-              <select ref={selectRef} value={postId} onChange={(e) => { setPostId(e.target.value); if (error) setError(null); }} className="small border p-2 rounded flex-1 !text-base px-4 py-1 hidden max-w-[600px]" aria-label="Select post to analyze" name="postanalyzer-post" id="postanalyzer-post" disabled={loading} >
-                <option data-display="Select a post…" disabled>{loadingPosts ? 'Loading posts…' : 'Select'}</option>
-                {Object.entries(
-                  posts.reduce((groups, post) => {
-                    if (!groups[post.status]) groups[post.status] = [];
-                    groups[post.status].push(post);
-                    return groups;
-                  }, {})
-                ).map(([status, groupPosts]) => (
-                  <optgroup key={status} label={status.charAt(0).toUpperCase() + status.slice(1)}>
-                    {groupPosts.map(p => (
-                      <option key={p.id} value={p.id}>{p.title}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-
-              <button onClick={analyzePost} disabled={isButtonDisabled} className="bg-blue-600 hover:not-disabled:bg-blue-500 text-white px-4 py-2 text-base rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed max-w-[200px] min-w-[130px]">{loading ? 'Analyzing...' : 'Analyze Post'}</button>
-
-              <button onClick={handleReset} className={`${loading ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} px-4 py-2 text-base rounded cursor-pointer max-w-[100px] min-w-[80px] transition-colors`}
-              >{loading ? 'Abort' : 'Reset'}</button>
-            </div>
-          </>
-        )}
-
-        {error && <div className="mb-1 text-red-600" role="alert">{error}</div>}
       </div>
+
+      <p className="head-text">{loadingPosts ? 'Loading available posts...' : hasPosts ? 'Choose a post to generate an automated QA & SEO report.' : 'No posts are currently available for analysis.'}</p>
+
+      {/* Show empty state when no posts are available */}
+      {!loadingPosts && !hasPosts && !error && (
+        <EmptyState loading={loadingPosts} />
+      )}
+
+      {/* Only show controls when posts are available */}
+      {hasPosts && (
+        <>
+          <div className="flex items-center gap-3 mb-2 max-w-3xl">
+            <select ref={selectRef} value={postId} onChange={(e) => { setPostId(e.target.value); if (error) setError(null); }} className="small border p-2 rounded flex-1 !text-base px-4 py-1 hidden max-w-[600px]" aria-label="Select post to analyze" name="postanalyzer-post" id="postanalyzer-post" disabled={loading} >
+              <option data-display="Select a post…" disabled>{loadingPosts ? 'Loading posts…' : 'Select'}</option>
+              {Object.entries(
+                posts.reduce((groups, post) => {
+                  if (!groups[post.status]) groups[post.status] = [];
+                  groups[post.status].push(post);
+                  return groups;
+                }, {})
+              ).map(([status, groupPosts]) => (
+                <optgroup key={status} label={status.charAt(0).toUpperCase() + status.slice(1)}>
+                  {groupPosts.map(p => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+
+            <button onClick={analyzePost} disabled={isButtonDisabled} className="bg-blue-600 hover:not-disabled:bg-blue-500 text-white px-4 py-2 text-base rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed max-w-[200px] min-w-[130px]">{loading ? 'Analyzing...' : 'Analyze Post'}</button>
+
+            <button onClick={handleReset} className={`${loading ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} px-4 py-2 text-base rounded cursor-pointer max-w-[100px] min-w-[80px] transition-colors`}
+            >{loading ? 'Abort' : 'Reset'}</button>
+          </div>
+        </>
+      )}
+
+      {error && <div className="mb-1 text-red-600" role="alert">{error}</div>}
 
       {/* Settings Modal */}
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} users={users} />
