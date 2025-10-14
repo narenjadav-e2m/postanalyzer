@@ -7,7 +7,7 @@ defined('ABSPATH') || exit;
 /**
  * REST endpoint that analyzes a post and returns metadata, SEO info, images, and suggestions.
  */
-class AnalyzePost
+class Analyze_Post
 {
 
     public function __construct()
@@ -178,7 +178,7 @@ class AnalyzePost
             'url_suggestions' => $url_suggestions,
             'ai_suggestions' => $ai_suggestions,
         ];
-        
+
         $response = \PostAnalyzer\Plugin::instance()->recursive_html_entity_decode($response);
 
         return rest_ensure_response($response);
@@ -297,7 +297,7 @@ class AnalyzePost
                 continue;
             }
 
-            $unique_images[] = $image;
+            $unique_images[$image['id']] = $image;
             if ($image['id']) {
                 $seen_ids[] = $image['id'];
             }

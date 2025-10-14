@@ -7,10 +7,8 @@ defined('ABSPATH') || exit;
 /**
  * REST endpoint that returns a list of users for the admin UI dropdown.
  */
-
 class Users
 {
-
     public function __construct()
     {
         add_action('rest_api_init', [$this, 'register_routes']);
@@ -64,8 +62,8 @@ class Users
         if (!empty($role)) {
             $args['role'] = $role;
         } else {
-            // By default, get users who can write posts
-            $args['who'] = 'authors'; // This gets users with author, editor, and admin roles
+            // Default: get users who can publish posts (Authors, Editors, Admins)
+            $args['capability'] = ['publish_posts'];
         }
 
         $users_query = new \WP_User_Query($args);

@@ -48,8 +48,8 @@ class Plugin
     public function register_admin_page(): void
     {
         add_menu_page(
-            __('PostAnalyzer', 'postanalyzer'),
-            __('PostAnalyzer', 'postanalyzer'),
+            __('Post Analyzer', 'postanalyzer'),
+            __('Post Analyzer', 'postanalyzer'),
             'edit_posts',
             self::SLUG,
             [$this, 'render_admin_page'],
@@ -132,7 +132,7 @@ class Plugin
     public function load_endpoints(): void
     {
         $classes = [
-            \PostAnalyzer\API\AnalyzePost::class,
+            \PostAnalyzer\API\Analyze_Post::class,
             \PostAnalyzer\API\Posts::class,
             \PostAnalyzer\API\Settings::class,
             \PostAnalyzer\API\Users::class,

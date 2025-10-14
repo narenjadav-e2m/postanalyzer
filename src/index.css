@@ -5,21 +5,20 @@
   --font-exo: 'Exo 2 Variable', sans-serif;
 }
 
-#postanalyzer-root,
-#postanalyzer {
+.postanalyzer-wrapper {
   @apply relative text-base font-exo;
 }
 
-#postanalyzer-root a:focus,
-#postanalyzer-root a:focus-visible,
-#postanalyzer-root button:focus,
-#postanalyzer-root button:focus-visible,
-#postanalyzer-root input:focus,
-#postanalyzer-root input:focus-visible,
-#postanalyzer-root select:focus,
-#postanalyzer-root select:focus-visible,
-#postanalyzer-root textarea:focus,
-#postanalyzer-root textarea:focus-visible {
+.postanalyzer-wrapper a:focus,
+.postanalyzer-wrapper a:focus-visible,
+.postanalyzer-wrapper button:focus,
+.postanalyzer-wrapper button:focus-visible,
+.postanalyzer-wrapper input:focus,
+.postanalyzer-wrapper input:focus-visible,
+.postanalyzer-wrapper select:focus,
+.postanalyzer-wrapper select:focus-visible,
+.postanalyzer-wrapper textarea:focus,
+.postanalyzer-wrapper textarea:focus-visible {
   @apply outline-none shadow-none;
 }
 
@@ -28,245 +27,319 @@
   min-height: clamp(700px, 85dvh, 100vh);
 }
 
+/* Loading spinner start */
+
+.postanalyzer-wrapper .loading-spinner-wrap {
+  @apply flex flex-col items-center justify-center p-12;
+}
+
+.postanalyzer-wrapper .loading-spinner-wrap .pa-spinner {
+  @apply w-12 h-12 text-blue-600 animate-spin;
+}
+
+.postanalyzer-wrapper .loading-spinner-wrap .pa-spinner circle{
+  @apply opacity-25;
+}
+
+.postanalyzer-wrapper .loading-spinner-wrap .pa-spinner path{
+  @apply opacity-75;
+}
+
+.postanalyzer-wrapper .loading-spinner-wrap .loading-title {
+  @apply mt-4 !text-lg text-gray-600 !my-1;
+}
+
+.postanalyzer-wrapper .loading-spinner-wrap .loading-text {
+  @apply mt-2 !text-base text-gray-500 !my-1;
+}
+
+/* Loading spinner end */
+
 /* Header Start */
 
-#postanalyzer-root button,
-#postanalyzer-root a {
+.postanalyzer-wrapper button,
+.postanalyzer-wrapper a {
   @apply cursor-pointer transition duration-300 ease-in-out;
 }
 
-#postanalyzer-root .postanalyzer-wrapper.modal-open {
+.postanalyzer-wrapper.modal-open {
   @apply !overflow-hidden;
 }
 
-#postanalyzer-root .sticky-head:before {
+.postanalyzer-wrapper .sticky-head:before {
   @apply absolute top-6/12 left-0 w-full h-[125%] bg-white -z-10 transform-[translateY(-55%)] content-[''];
 }
 
-#postanalyzer-root .head-title {
+.postanalyzer-wrapper .header-wrapper {
+  @apply flex items-center justify-between mb-4;
+}
+
+.postanalyzer-wrapper .head-title {
   @apply !text-3xl !font-bold !text-blue-600 !tracking-[1px] !p-0;
 }
 
-#postanalyzer-root .head-text {
+.postanalyzer-wrapper .head-text {
   @apply text-base text-gray-600 !mt-1 !mb-2;
 }
 
-#postanalyzer-root .nice-select:not(.open) * {
+.postanalyzer-wrapper .nice-select:not(.open) * {
   @apply !pointer-events-none;
 }
 
-#postanalyzer-root .nice-select .current {
+.postanalyzer-wrapper .nice-select .current {
   @apply block overflow-hidden;
 }
 
-#postanalyzer-root .nice-select .nice-select-dropdown {
-  @apply max-h-[60dvh] !mt-3;
+.postanalyzer-wrapper .nice-select .nice-select-dropdown {
+  @apply max-h-[60dvh] !mt-3 w-full shadow-gray-200 shadow-lg;
 }
 
-#postanalyzer-root .nice-select .nice-select-search-box {
+.postanalyzer-wrapper .nice-select .nice-select-search-box {
   @apply pointer-events-auto;
 }
 
-#postanalyzer-root .optgroup {
+.postanalyzer-wrapper .optgroup {
   @apply !py-3 !px-2 bg-gray-100;
+}
+
+.postanalyzer-wrapper .input-wrapper {
+  @apply flex flex-col items-start gap-3 mb-2 w-full flex-wrap;
+}
+
+.postanalyzer-wrapper .input-wrapper .post-select {
+  @apply border p-2 rounded flex-1 !text-base px-4 py-1 max-w-full w-full;
+}
+
+.postanalyzer-wrapper .input-wrapper .action-wrapper {
+  @apply flex items-center gap-3;
+}
+
+.postanalyzer-wrapper .input-wrapper .analyze-post-button {
+  @apply bg-blue-600 hover:not-disabled:bg-blue-500 text-white px-4 py-2 text-base rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed max-w-[200px] min-w-[130px];
+}
+
+.postanalyzer-wrapper .input-wrapper .reset-btn {
+  @apply bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 text-base rounded cursor-pointer max-w-[100px] min-w-[80px] transition-colors;
+}
+
+.postanalyzer-wrapper .input-wrapper .reset-btn.abort {
+  @apply bg-red-600 hover:bg-red-500 text-white;
 }
 
 /* Header End */
 
 /* Result Start */
 
-#postanalyzer-root .result-container .title {
+.postanalyzer-wrapper .result-container {
+  @apply mt-4 pt-2 border-t-[1px] border-gray-300;
+}
+
+.postanalyzer-wrapper .title-wrapper {
+  @apply flex justify-between items-start mb-3;
+}
+
+.postanalyzer-wrapper .result-container .title {
   @apply !text-2xl !font-bold !text-blue-600 !p-0 !m-0;
 }
 
-#postanalyzer-root .result-container .card {
+.postanalyzer-wrapper .result-container .card {
   @apply mb-4 p-4 border rounded !w-full !max-w-full;
 }
 
-#postanalyzer-root .result-container .card .card-title {
+.postanalyzer-wrapper .result-container .card .rr-wrap {
+  @apply mb-1;
+}
+
+.postanalyzer-wrapper .result-container .card .rr-label {
+  @apply mr-2;
+}
+
+.postanalyzer-wrapper .result-container .card .card-title {
   @apply font-semibold !text-2xl !mt-0 !mb-3 !pb-3 border-b-[1px] border-gray-300;
 }
 
-#postanalyzer-root .result-container .card .featured-img {
+.postanalyzer-wrapper .result-container .card .featured-img {
   @apply flex flex-row items-start justify-between gap-5;
 }
 
-#postanalyzer-root .result-container .card .featured-img .card-img {
+.postanalyzer-wrapper .result-container .card .featured-img .card-img {
   @apply max-w-[500px] w-full h-auto mb-2 rounded aspect-[1280/400] object-cover;
 }
 
-#postanalyzer-root .result-container .card .attached-images {
+.postanalyzer-wrapper .result-container .card .attached-images {
   @apply grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4;
 }
 
-#postanalyzer-root .result-container .card .attached-img {
+.postanalyzer-wrapper .result-container .card .attached-img {
   @apply flex flex-row items-start justify-between gap-5 border-gray-300 border-1 rounded p-2;
 }
 
-#postanalyzer-root .result-container .card .attached-img .card-img {
+.postanalyzer-wrapper .result-container .card .attached-img .card-img {
   @apply max-w-[200px] min-w-[200px] w-full h-auto mb-2 rounded aspect-square object-cover;
 }
 
 /* Result End */
 
+/* Empty State Start */
+
+.postanalyzer-wrapper .empty-state-wrap {
+  @apply flex flex-col items-center justify-center p-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300;
+}
+
+.postanalyzer-wrapper .empty-state-wrap .empty-icon {
+  @apply w-16 h-16 text-gray-400 mb-4;
+}
+
+.postanalyzer-wrapper .empty-state-wrap .empty-title {
+  @apply text-lg font-medium text-gray-900 mb-1;
+}
+
+.postanalyzer-wrapper .empty-state-wrap .empty-text {
+  @apply text-gray-500 my-1;
+}
+
+/* Empty State End */
+
 /* Settings Start */
 
-#postanalyzer-root .settings-button {
+.postanalyzer-wrapper .settings-button {
   @apply bg-gray-100 hover:bg-blue-600 text-blue-600 hover:text-white p-2 rounded cursor-pointer;
 }
 
-#postanalyzer-root .settings-button svg {
+.postanalyzer-wrapper .settings-button svg {
   @apply transition-all duration-300 ease-in-out;
 }
 
-#postanalyzer-root .settings-button:hover svg {
+.postanalyzer-wrapper .settings-button:hover svg {
   @apply rotate-360;
 }
 
-#postanalyzer-root .settings-modal-overlay {
+.postanalyzer-wrapper .settings-modal-overlay {
   @apply absolute inset-0 bg-[#0000002b] flex items-start justify-center z-50 backdrop-blur-[2px] pt-10;
 }
 
-#postanalyzer-root .settings-modal-container {
+.postanalyzer-wrapper .settings-modal-container {
   @apply bg-white rounded-lg p-6 max-w-lg w-11/12 mx-4 relative;
 }
 
-#postanalyzer-root .settings-modal-close {
+.postanalyzer-wrapper .settings-modal-close {
   @apply absolute top-4 right-4 text-gray-400 hover:text-gray-600;
 }
 
-#postanalyzer-root .settings-modal-title {
+.postanalyzer-wrapper .settings-modal-title {
   @apply text-xl font-semibold mb-4 mt-0;
 }
 
-#postanalyzer-root .settings-form-group {
+.postanalyzer-wrapper .settings-form-group {
   @apply mb-4;
 }
 
-#postanalyzer-root .settings-form-group-last {
+.postanalyzer-wrapper .settings-form-group-last {
   @apply mb-6;
 }
 
-#postanalyzer-root .settings-form-label {
+.postanalyzer-wrapper .settings-form-label {
   @apply block text-sm font-medium text-gray-700 mb-2;
 }
 
-#postanalyzer-root .settings-input-wrapper {
+.postanalyzer-wrapper .settings-input-wrapper {
   @apply relative;
 }
 
-#postanalyzer-root .settings-form-input {
+.postanalyzer-wrapper .settings-form-input {
   @apply w-full px-3 py-2 !pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
 }
 
-#postanalyzer-root .settings-help-button {
+.postanalyzer-wrapper .settings-help-button {
   @apply absolute right-2 top-[50%] transform-[translateY(-50%)] text-gray-400 hover:text-gray-600;
 }
 
-#postanalyzer-root .settings-help-popover {
+.postanalyzer-wrapper .settings-help-popover {
   @apply mt-2 p-4 bg-blue-50 border border-blue-200 rounded-md text-sm;
 }
 
-#postanalyzer-root .settings-help-title {
+.postanalyzer-wrapper .settings-help-title {
   @apply font-semibold !mt-0 mb-1;
 }
 
-#postanalyzer-root .settings-help-list {
+.postanalyzer-wrapper .settings-help-list {
   @apply list-decimal ml-4 space-y-1;
 }
 
-#postanalyzer-root .settings-help-link {
+.postanalyzer-wrapper .settings-help-link {
   @apply text-blue-600 hover:underline;
 }
 
-#postanalyzer-root .settings-help-close {
+.postanalyzer-wrapper .settings-help-close {
   @apply text-blue-600 hover:underline text-xs;
 }
 
-#postanalyzer-root .settings-form-select {
+.postanalyzer-wrapper .settings-form-select {
   @apply border p-2 flex-1 !text-base px-4 py-1 w-full border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
 }
 
-#postanalyzer-root .settings-message {
+.postanalyzer-wrapper .settings-message {
   @apply mb-4 p-3 rounded-md text-sm;
 }
 
-#postanalyzer-root .settings-message-success {
+.postanalyzer-wrapper .settings-message-success {
   @apply bg-green-50 text-green-800 border border-green-200;
 }
 
-#postanalyzer-root .settings-message-error {
+.postanalyzer-wrapper .settings-message-error {
   @apply bg-red-50 text-red-800 border border-red-200;
 }
 
-#postanalyzer-root .settings-actions {
+.postanalyzer-wrapper .settings-actions {
   @apply flex justify-start gap-3;
 }
 
-#postanalyzer-root .settings-button-cancel {
+.postanalyzer-wrapper .settings-button-cancel {
   @apply px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors;
 }
 
-#postanalyzer-root .settings-button-save {
+.postanalyzer-wrapper .settings-button-save {
   @apply px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors;
 }
 
-#postanalyzer-root .settings-radio-group {
+.postanalyzer-wrapper .settings-radio-group {
   @apply flex flex-row gap-2 mt-2;
 }
 
-#postanalyzer-root .settings-radio-label {
+.postanalyzer-wrapper .settings-radio-label {
   @apply flex items-center gap-2 cursor-pointer;
 }
 
-#postanalyzer-root .settings-radio-input {
+.postanalyzer-wrapper .settings-radio-input {
   @apply w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 !m-0;
 }
 
-#postanalyzer-root .settings-radio-input:checked {
+.postanalyzer-wrapper .settings-radio-input:checked {
   @apply !border-blue-500 focus:ring-blue-500;
 }
 
-#postanalyzer-root .settings-radio-input:checked::before {
+.postanalyzer-wrapper .settings-radio-input:checked::before {
   @apply !bg-blue-600 max-md:!m-[0.1566rem];
 }
 
-#postanalyzer-root .settings-radio-text {
+.postanalyzer-wrapper .settings-radio-text {
   @apply text-sm text-gray-700;
 }
 
-#postanalyzer-root .settings-message-info {
+.postanalyzer-wrapper .settings-message-info {
   @apply bg-blue-50 text-blue-800 border border-blue-200;
 }
 
-#postanalyzer-root .settings-message-spinner {
+.postanalyzer-wrapper .settings-message-spinner {
   @apply inline-block ml-2;
 }
 
-#postanalyzer-root .settings-spinner-icon {
+.postanalyzer-wrapper .settings-spinner-icon {
   @apply animate-spin h-4 w-4 inline;
 }
 
-#postanalyzer-root .settings-message {
+.postanalyzer-wrapper .settings-message {
   @apply flex items-center;
 }
 
 /* Settings End */
-
-/* Aniamtion Start */
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.pa-spinner {
-  animation: spin 1s linear infinite;
-}
-
-/* Aniamtion End */
