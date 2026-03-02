@@ -271,8 +271,8 @@ class AI_Helper
     private function build_suggestions_prompt(array $context): string
     {
         $title       = isset($context['title']) ? wp_strip_all_tags((string) $context['title']) : '';
-        $content     = isset($context['content']) ? wp_strip_all_tags((string) $context['content']) : '';
         $excerpt     = isset($context['excerpt']) ? wp_strip_all_tags((string) $context['excerpt']) : '';
+        $content     = isset($context['content']) ? wp_strip_all_tags((string) $context['content']) : '';
         $seo_title   = isset($context['seo_title']) ? wp_strip_all_tags((string) $context['seo_title']) : '';
         $seo_desc    = isset($context['seo_description']) ? wp_strip_all_tags((string) $context['seo_description']) : '';
         $keywords    = $context['keywords'] ?? [];
@@ -286,21 +286,82 @@ class AI_Helper
         $keywords_str = implode(', ', $keywordsArr);
 
         return
-            "You are an SEO/content auditor for WordPress posts.\n" .
-            "Return actionable improvements based on the post and current SEO fields.\n\n" .
+            $prompt =
+            "You are a senior SEO strategist and technical WordPress content auditor with 15+ years of experience in on-page SEO, content optimization, and search intent alignment.\n\n" .
 
-            "OUTPUT RULES (STRICT):\n" .
-            "- Output ONLY valid JSON. No markdown. No extra text.\n" .
-            "- EXACT JSON shape:\n" .
-            "  {\"suggestions\":[\"...\",\"...\",\"...\"]}\n" .
-            "- suggestions: 5 to 10 items.\n" .
+            "Your task is to analyze the provided WordPress post data and generate precise, high-impact, actionable improvements that increase:\n" .
+            "- Search engine rankings\n" .
+            "- Click-through rate (CTR)\n" .
+            "- Content depth and topical authority\n" .
+            "- Technical SEO quality\n" .
+            "- User engagement and readability\n\n" .
+
+            "Focus only on practical improvements that the editor can immediately apply.\n\n" .
+
+            "--------------------------------------------------\n" .
+            "OUTPUT RULES (STRICT — DO NOT VIOLATE):\n\n" .
+            "- Output ONLY valid JSON.\n" .
+            "- No markdown.\n" .
+            "- No explanations.\n" .
+            "- No extra text.\n" .
+            "- EXACT JSON structure:\n" .
+            "  {\"suggestions\":[\"...\",\"...\",\"...\"]}\n\n" .
+            "- 'suggestions' must contain 5 to 10 items.\n" .
             "- Each suggestion MUST be a complete sentence.\n" .
-            "- Each suggestion MUST be INNER HTML only (NO wrapping tags like <p>, <div>, <li>).\n" .
-            "- Allowed emphasis tags only: <strong>, <em>, <code>, <br>.\n" .
-            "- No links. No images. No other HTML tags.\n" .
-            "- No leading hyphens/bullets (don't start with '-' or '•').\n" .
-            "- Do not include any other keys.\n\n" .
+            "- Each suggestion MUST be INNER HTML only.\n" .
+            "- DO NOT wrap suggestions in <p>, <div>, <ul>, <li>, etc.\n" .
+            "- Allowed HTML tags ONLY: <strong>, <em>, <code>, <br>.\n" .
+            "- Do NOT use any other HTML tags.\n" .
+            "- No links.\n" .
+            "- No images.\n" .
+            "- No emojis.\n" .
+            "- No leading hyphens, bullets, or numbering.\n" .
+            "- Do NOT include any additional JSON keys.\n\n" .
 
+            "If data is missing, base suggestions only on available fields.\n\n" .
+
+            "--------------------------------------------------\n" .
+            "EVALUATION FRAMEWORK:\n\n" .
+
+            "1. Title Optimization\n" .
+            "   - Keyword placement\n" .
+            "   - Emotional triggers\n" .
+            "   - Power words\n" .
+            "   - Length optimization (50–60 characters ideal)\n\n" .
+
+            "2. Meta Description Optimization\n" .
+            "   - CTR improvement\n" .
+            "   - Clear benefit\n" .
+            "   - Call-to-action\n" .
+            "   - 150–160 characters target\n\n" .
+
+            "3. Keyword Usage\n" .
+            "   - Primary keyword presence in title, intro, subheadings\n" .
+            "   - Semantic keyword opportunities\n" .
+            "   - Keyword stuffing risks\n\n" .
+
+            "4. Content Quality\n" .
+            "   - Depth vs word count\n" .
+            "   - Missing sections\n" .
+            "   - Structural improvements (H2/H3 recommendations)\n" .
+            "   - Search intent alignment\n\n" .
+
+            "5. Internal SEO Signals\n" .
+            "   - Featured image usage\n" .
+            "   - Missing alt text issues\n" .
+            "   - Readability improvements\n" .
+            "   - Snippet optimization opportunities\n\n" .
+
+            "6. Engagement & Conversion\n" .
+            "   - Missing CTA\n" .
+            "   - FAQ opportunities\n" .
+            "   - Featured snippet formatting\n" .
+            "   - Suggest list formatting where useful (describe only, do not use <ul> tags)\n\n" .
+
+            "Only suggest improvements that are relevant to the provided data.\n" .
+            "Avoid generic advice like 'improve SEO' — every suggestion must be specific.\n\n" .
+
+            "--------------------------------------------------\n" .
             "POST DATA:\n" .
             "Title: {$title}\n" .
             "Excerpt: {$excerpt}\n" .
@@ -311,7 +372,9 @@ class AI_Helper
             "Has featured image: {$has_featured}\n" .
             "Images missing alt text: {$missing_alt_count}\n\n" .
 
-            "CONTENT (trimmed):\n" . mb_substr($content, 0, 1800);
+            "--------------------------------------------------\n" .
+            "CONTENT (trimmed):\n" .
+            "{$content}";
     }
 
     /**
