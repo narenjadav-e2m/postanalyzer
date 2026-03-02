@@ -62,7 +62,7 @@ export default function SettingsModal({ isOpen, onClose, users = [] }) {
         if (isOpen && wrapper) {
             // Disable scroll on wrapper
             wrapper.style.overflow = 'hidden';
-            // Optionally, you can also disable scroll on body
+            // Optionally, you can also disable scroll on body to prevent any background scrolling
             document.body.style.overflow = 'hidden';
         } else if (wrapper) {
             // Re-enable scroll
@@ -349,7 +349,7 @@ export default function SettingsModal({ isOpen, onClose, users = [] }) {
                     </label>
                     <div className="settings-input-wrapper">
                         <input
-                            type="text"
+                            type="password"
                             id={`${selectedPlatform}-api-key`}
                             value={apiKeys[selectedPlatform]}
                             onChange={(e) => handleApiKeyChange(e.target.value)}

@@ -5,7 +5,7 @@ export default function ImageMeta({ img, featured = false }) {
 
     return (
         <div className={featured ? 'featured-img' : 'attached-img'}>
-            <div>
+            <div className="img-meta w-full">
                 <MetaRow label="Title" value={img.title} />
                 <MetaRow label="Alt" value={img.alt} />
                 <MetaRow label="Caption" value={img.caption} />
@@ -14,7 +14,7 @@ export default function ImageMeta({ img, featured = false }) {
                 <MetaRow label="Dimensions" value={img.width && img.height ? `${img.width} \u00D7 ${img.height}` : undefined} />
             </div>
 
-            <a href={img.src} data-fancybox={featured ? "featured" : "attached"} data-caption={img.caption || img.title || ''} skipBlank >
+            <a className="w-auto" href={img.src} data-fancybox={featured ? "featured" : "attached"} data-caption={img.caption || img.title || ''} skipBlank >
                 {img.src && (<img src={img.src} alt={img.alt || ''} className="card-img" />)}
             </a>
         </div>

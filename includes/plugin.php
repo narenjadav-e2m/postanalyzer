@@ -115,15 +115,15 @@ class Plugin
             return;
         }
 
-        $args = array(
+        $args = [
             'id'    => 'analyze_post',
             'title' => 'Analyze Post',
             'href'  => admin_url('admin.php?page=postanalyzer'),
-            'meta'  => array(
+            'meta'  => [
                 'class' => 'analyze-post-admin-bar',
                 'title' => 'Analyze Post Page'
-            )
-        );
+            ]
+        ];
 
         $wp_admin_bar->add_node($args);
     }

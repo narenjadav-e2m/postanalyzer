@@ -133,29 +133,57 @@ class Analyze_Post
         $base_for_slug = $seo_title ?: $title ?: $url;
         $slug_candidate = sanitize_title($base_for_slug);
         $url_suggestions = [];
-        if ($slug_candidate) {
-            $parsed = parse_url($url);
-            $scheme = $parsed['scheme'] ?? 'https';
-            $host = $parsed['host'] ?? '';
-            $url_suggestions[] = "{$scheme}://{$host}/{$slug_candidate}";
-            $url_suggestions[] = "{$scheme}://{$host}/{$slug_candidate}-1";
-            $url_suggestions[] = "{$scheme}://{$host}/{$slug_candidate}-optimized";
-        }
+
+        $gemini = new \PostAnalyzer\API\AI_Helper();
+        $url_suggestions = $gemini->generate_url_suggestions([
+            'title' => $post->post_title,
+            'content' => $post->post_content,
+            'keywords' => $seo_keywords,
+        ]);
 
         // AI suggestions
-        $ai_suggestions = [];
-        if (!empty($seo_issues)) {
-            $ai_suggestions[] = 'Improve SEO title/description: make the title descriptive (50-60 chars) and meta description 150-160 chars with target keywords.';
-        }
-        if (empty($featured_image) && count($attached_images) === 0) {
-            $ai_suggestions[] = 'No images found: add a featured image and descriptive alt text to improve accessibility and SEO.';
-        } else {
-            foreach ($attached_images as $a) {
-                if (empty($a['alt'])) {
-                    $ai_suggestions[] = "Image {$a['filename']} is missing alt text.";
-                    if (count($ai_suggestions) > 8) break;
+        // $ai_suggestions = [];
+        // if (!empty($seo_issues)) {
+        //     $ai_suggestions[] = 'Improve SEO title/description: make the title descriptive (50-60 chars) and meta description 150-160 chars with target keywords.';
+        // }
+        // if (empty($featured_image) && count($attached_images) === 0) {
+        //     $ai_suggestions[] = 'No images found: add a featured image and descriptive alt text to improve accessibility and SEO.';
+        // } else {
+        //     foreach ($attached_images as $a) {
+        //         if (empty($a['alt'])) {
+        //             $ai_suggestions[] = "Image {$a['filename']} is missing alt text.";
+        //             if (count($ai_suggestions) > 8) break;
+        //         }
+        //     }
+        // }
+        $missing_alt_count = 0;
+        if (!empty($attached_images)) {
+            foreach ($attached_images as $img) {
+                if (empty($img['alt'])) {
+                    $missing_alt_count++;
                 }
             }
+        }
+
+        $ai = new \PostAnalyzer\API\AI_Helper();
+
+        $ai_suggestions = $ai->generate_ai_suggestions([
+            'title' => $post->post_title,
+            'excerpt' => $excerpt,
+            'content' => $post->post_content,
+            'seo_title' => $seo_title,
+            'seo_description' => $seo_description,
+            'keywords' => $seo_keywords,
+            'word_count' => $word_count,
+            'has_featured_image' => !empty($featured_image),
+            'missing_alt_count' => $missing_alt_count,
+        ]);
+
+        // If AI fails, keep a small fallback (optional but recommended)
+        if (is_wp_error($ai_suggestions)) {
+            $ai_suggestions = [
+                'AI suggestions unavailable: ' . $ai_suggestions->get_error_message(),
+            ];
         }
 
         $response = [

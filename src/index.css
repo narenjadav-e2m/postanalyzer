@@ -175,7 +175,7 @@
 }
 
 .postanalyzer-wrapper .result-container .card .attached-img .card-img {
-  @apply max-w-[200px] min-w-[200px] w-full h-auto mb-2 rounded aspect-square object-cover;
+  @apply max-w-[200px] w-full h-auto mb-2 rounded aspect-square object-cover;
 }
 
 /* Result End */

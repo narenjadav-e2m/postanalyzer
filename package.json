@@ -21,6 +21,7 @@
   "dependencies": {
     "@fancyapps/ui": "^6.0.34",
     "@tailwindcss/vite": "^4.1.13",
+    "feather-icons": "^4.29.2",
     "jquery": "^3.7.1",
     "nice-select2": "^2.4.1",
     "react": "^19.1.1",

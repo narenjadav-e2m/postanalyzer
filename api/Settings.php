@@ -5,7 +5,6 @@ namespace PostAnalyzer\API;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\RequestException;
 
 defined('ABSPATH') || exit;
 
@@ -400,7 +399,7 @@ class Settings
         return false;
     }
 
-    public function get_settings($request)
+    public function get_settings()
     {
         $json_settings = get_option(self::OPTION_NAME, '');
 

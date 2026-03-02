@@ -8,8 +8,12 @@ import 'nice-select2/dist/css/nice-select2.css';
 import LoadingSpinner from './components/LoadingSpinner';
 import EmptyState from './components/EmptyState';
 import SettingsModal from './components/SettingsModal';
-import MetaRow from './components/MetaRow';
-import ImageMeta from './components/ImageMeta';
+
+import BasicInfo from './components/cards/BasicInfo';
+import SEOData from './components/cards/SEOData';
+import FeaturedImage from './components/cards/FeaturedImage';
+import AttachedImages from './components/cards/AttachedImages';
+
 
 function PostAnalyzer() {
 
@@ -307,55 +311,13 @@ function PostAnalyzer() {
                 <h2 className="title">Analysis Report</h2>
               </div>
 
-              {/* Basic Post Info */}
-              <section className="card">
-                <h3 className="card-title">Basic Post Info</h3>
-                <MetaRow label="Title" value={report.title} />
-                <MetaRow label="URL" value={`<a href="${report.url}" target="_blank" rel="noopener noreferrer">${report.url}</a>`} isHtml={true} />
-                <MetaRow label="Author" value={report.author} />
-                <MetaRow label="Published Date" value={report.published_date} />
-                <MetaRow label="Modified Date" value={report.updated_date} />
-                <MetaRow label="Categories" value={report.categories} isHtml={true} />
-                <MetaRow label="Tags" value={report.tags} isHtml={true} />
-                <MetaRow label="Word Count" value={report.word_count} />
-              </section>
+              <BasicInfo title="Basic Post Info" report={report} />
 
-              {/* SEO Data */}
-              <section className="card">
-                <h3 className="card-title">SEO Data</h3>
-                <MetaRow label="SEO Title" value={report.seo?.title} />
-                <MetaRow label="Meta Description" value={report.seo?.description} />
-                <MetaRow label="Keywords" value={report.seo?.keywords} />
-                {report.seo?.issues?.length > 0 && (
-                  <div className="mt-2">
-                    <strong>Issues:</strong>
-                    <ul className="list-disc ml-5 mt-1">
-                      {report.seo.issues.map((it, i) => <li key={i}>{it}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </section>
+              <SEOData title="SEO Data" report={report.seo} />
 
-              {/* Featured Image */}
-              <section className="card">
-                <h3 className="card-title">Featured Image</h3>
-                {report.featured_image && <ImageMeta img={report.featured_image} featured={true} />}
-                {!report.featured_image && <div className="text-sm text-gray-600">No featured image set.</div>}
-              </section>
+              <FeaturedImage title="Featured Image" featured_image={report.featured_image} />
 
-              {/* Attached Images */}
-              <section className="card">
-                <h3 className="card-title">Attached Images ({Object.keys(report.attached_images || {}).length})</h3>
-                {(!report.attached_images || report.attached_images.length === 0) && <div className="text-sm text-gray-600">No attached images found.</div>}
-                {report.attached_images && Object.keys(report.attached_images).length > 0 && (
-                  <div className="attached-images">
-                    {Object.values(report.attached_images).map((img, i) => (
-                      <ImageMeta key={img.id || i} img={img} featured={false} />
-                    ))}
-                  </div>
-                )}
-
-              </section>
+              <AttachedImages title="Attached Images" attached_images={report.attached_images} />
 
               {/* URL & Slug Suggestions */}
               <section className="card">
@@ -371,9 +333,9 @@ function PostAnalyzer() {
               <section className="card">
                 <h3 className="card-title">AI Suggestions</h3>
                 {report.ai_suggestions && report.ai_suggestions.length > 0 ? (
-                  <ul className="list-disc ml-5">
-                    {report.ai_suggestions.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
+                  <ol className="list-disc ml-5">
+                    {report.ai_suggestions.map((s, i) => <li key={i} dangerouslySetInnerHTML={{ __html: s }} />)}
+                  </ol>
                 ) : <div className="text-gray-600">No AI suggestions returned.</div>}
               </section>
             </div>

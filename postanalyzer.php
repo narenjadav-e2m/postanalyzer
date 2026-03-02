@@ -5,7 +5,7 @@
  * Plugin URI: https://e2msolutions.com
  * Description: WordPress plugin that performs automated QA on blog posts based on SOPs, with AI-generated suggestions for missing metadata, SEO, and categorization.
  * Version: 1.0.0
- * Author: E2M Solutions
+ * Author: Naren Jadav
  * Author URI: https://e2msolutions.com
  * License: GPL2
  * Text Domain: postanalyzer
@@ -27,6 +27,7 @@ if (! file_exists($plugin_file)) {
     // try lowercase fallback
     $plugin_file = __DIR__ . '/includes/plugin.php';
 }
+
 if (file_exists($plugin_file)) {
     require_once $plugin_file;
 }
