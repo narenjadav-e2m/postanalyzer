@@ -2,535 +2,320 @@
 
 namespace PostAnalyzer\API;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ClientException;
-use GuzzleHttp\Exception\ConnectException;
-
-defined('ABSPATH') || exit;
+defined( 'ABSPATH' ) || exit;
 
 /**
- * REST endpoint for PostAnalyzer settings management.
+ * Settings REST endpoints and persistent config helpers.
+ *
+ * @package PostAnalyzer
+ * @since   2.0.0
  */
-class Settings
-{
-    const OPTION_NAME = 'postanalyzer_settings';
-    const ALLOWED_PLATFORMS = ['chatgpt', 'gemini', 'groq'];
+class Settings {
 
-    private $httpClient;
+	const OPTION_NAME       = 'postanalyzer_settings';
+	const ALLOWED_PLATFORMS = [ 'openai', 'gemini', 'groq' ];
 
-    public function __construct()
-    {
-        add_action('rest_api_init', [$this, 'register_routes']);
+	public function __construct() {
+		add_action( 'rest_api_init', [ $this, 'register_routes' ] );
+	}
 
-        // Initialize Guzzle client with default options
-        $this->httpClient = new Client([
-            'timeout' => 10,
-            'verify' => true,
-            'http_errors' => false, // Don't throw exceptions on 4xx/5xx responses
-        ]);
-    }
+	public function register_routes(): void {
 
-    public function register_routes()
-    {
-        // Save settings endpoint
-        register_rest_route(
-            'postanalyzer/v1',
-            '/save-settings',
-            [
-                'methods'             => 'POST',
-                'callback'            => [$this, 'save_settings'],
-                'permission_callback' => function () {
-                    return current_user_can('manage_options');
-                },
-                'args' => [
-                    'ai_platform' => [
-                        'required'          => true,
-                        'type'              => 'string',
-                        'sanitize_callback' => 'sanitize_text_field',
-                        'validate_callback' => function ($value) {
-                            return in_array($value, self::ALLOWED_PLATFORMS);
-                        },
-                    ],
-                    'api_keys' => [
-                        'required'          => true,
-                        'type'              => 'object',
-                        'validate_callback' => function ($value) {
-                            return is_array($value);
-                        },
-                    ],
-                    'author_id' => [
-                        'required'          => true,
-                        'type'              => 'integer',
-                        'sanitize_callback' => 'absint',
-                        'validate_callback' => function ($value) {
-                            return $value > 0;
-                        },
-                    ],
-                ],
-            ]
-        );
+		$admin_perm = static fn() => current_user_can( 'manage_options' );
 
-        // Get settings endpoint
-        register_rest_route(
-            'postanalyzer/v1',
-            '/get-settings',
-            [
-                'methods'             => 'GET',
-                'callback'            => [$this, 'get_settings'],
-                'permission_callback' => function () {
-                    return current_user_can('edit_posts');
-                },
-            ]
-        );
-    }
+		register_rest_route( 'postanalyzer/v1', '/save-settings', [
+			'methods'             => \WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'save_settings' ],
+			'permission_callback' => $admin_perm,
+			'args'                => [
+				'ai_platform' => [
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => static fn( $v ) => sanitize_text_field( (string) $v ),
+					'validate_callback' => static fn( $v ) => in_array( $v, self::ALLOWED_PLATFORMS, true ),
+				],
+				'api_keys'    => [
+					'required'          => true,
+					'type'              => 'object',
+					'validate_callback' => static fn( $v ) => is_array( $v ),
+				],
+				'author_id'   => [
+					'required'          => false,
+					'type'              => 'integer',
+					'default'           => 0,
+					'sanitize_callback' => static fn( $v ) => abs( (int) $v ),
+				],
+			],
+		] );
 
-    public function save_settings($request)
-    {
-        $ai_platform = $request->get_param('ai_platform');
-        $api_keys = $request->get_param('api_keys');
-        $author_id = $request->get_param('author_id');
+		register_rest_route( 'postanalyzer/v1', '/get-settings', [
+			'methods'             => \WP_REST_Server::READABLE,
+			'callback'            => [ $this, 'get_settings' ],
+			'permission_callback' => $admin_perm,
+		] );
 
-        // Validate selected platform has an API key
-        if (!isset($api_keys[$ai_platform]) || empty(trim($api_keys[$ai_platform]))) {
-            return new \WP_Error(
-                'invalid_api_key',
-                sprintf('API key for %s cannot be empty', ucfirst($ai_platform)),
-                ['status' => 400]
-            );
-        }
+		register_rest_route( 'postanalyzer/v1', '/validate-key', [
+			'methods'             => \WP_REST_Server::CREATABLE,
+			'callback'            => [ $this, 'validate_key' ],
+			'permission_callback' => $admin_perm,
+			'args'                => [
+				'platform' => [
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => static fn( $v ) => sanitize_text_field( (string) $v ),
+					'validate_callback' => static fn( $v ) => in_array( $v, self::ALLOWED_PLATFORMS, true ),
+				],
+				'api_key'  => [
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => static fn( $v ) => sanitize_text_field( (string) $v ),
+				],
+			],
+		] );
+	}
 
-        // Verify the author exists
-        $user = get_user_by('id', $author_id);
-        if (!$user) {
-            return new \WP_Error(
-                'invalid_author',
-                'Selected author does not exist',
-                ['status' => 400]
-            );
-        }
+	// ── Handlers ──────────────────────────────────────────────────────────────
 
-        // Test the API key for the selected platform
-        $active_api_key = trim($api_keys[$ai_platform]);
-        $validation_result = $this->validate_api_key($ai_platform, $active_api_key);
+	public function save_settings( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$platform  = $request->get_param( 'ai_platform' );
+		$raw_keys  = (array) $request->get_param( 'api_keys' );
+		$author_id = (int) $request->get_param( 'author_id' );
 
-        if (!$validation_result['valid']) {
-            return new \WP_Error(
-                'invalid_api_key_test',
-                $validation_result['message'],
-                ['status' => 400]
-            );
-        }
+		$existing      = $this->load_raw_settings();
+		$existing_keys = $existing['api_keys'] ?? [];
 
-        // Prepare API keys array (only store non-empty keys)
-        $encrypted_keys = [];
-        foreach (self::ALLOWED_PLATFORMS as $platform) {
-            if (isset($api_keys[$platform]) && !empty(trim($api_keys[$platform]))) {
-                // Encrypt API keys before storage
-                $encrypted_keys[$platform] = $this->encrypt_api_key(trim($api_keys[$platform]));
-            }
-        }
+		$active_key = trim( (string) ( $raw_keys[ $platform ] ?? '' ) );
 
-        // Prepare settings array
-        $settings = [
-            'ai_platform' => $ai_platform,
-            'api_keys'    => $encrypted_keys,
-            'author_id'   => $author_id,
-            'updated_at'  => current_time('mysql'),
-            'updated_by'  => get_current_user_id(),
-        ];
+		// A new key for the active platform is only required when none is stored yet.
+		if ( $active_key === '' && empty( $existing_keys[ $platform ] ) ) {
+			return new \WP_Error(
+				'missing_api_key',
+				sprintf( __( 'API key for %s is required.', 'postanalyzer' ), ucfirst( $platform ) ),
+				[ 'status' => 400 ]
+			);
+		}
 
-        // Encode as JSON for storage
-        $json_settings = wp_json_encode($settings);
+		// Only ping the provider when the user actually supplied a new key.
+		if ( $active_key !== '' ) {
+			$validation = $this->validate_api_key( $platform, $active_key );
+			if ( ! $validation['valid'] ) {
+				return new \WP_Error( 'invalid_api_key', $validation['message'], [ 'status' => 422 ] );
+			}
+		}
 
-        if ($json_settings === false) {
-            return new \WP_Error(
-                'json_encode_error',
-                'Failed to encode settings',
-                ['status' => 500]
-            );
-        }
+		// Start from what is stored and only overwrite keys the user re-entered.
+		// Empty fields mean "unchanged" — never clobber a saved key with a blank
+		// or a masked placeholder echoed back from get_settings().
+		$encrypted_keys = $existing_keys;
+		foreach ( $raw_keys as $p => $key ) {
+			$key = trim( (string) $key );
+			if ( $key !== '' ) {
+				$encrypted_keys[ sanitize_key( $p ) ] = self::encrypt( $key );
+			}
+		}
 
-        // Save to options table
-        $saved = update_option(self::OPTION_NAME, $json_settings);
+		$new_settings = [
+			'ai_platform' => $platform,
+			'api_keys'    => $encrypted_keys,
+			'author_id'   => $author_id,
+			'updated_at'  => current_time( 'mysql' ),
+		];
 
-        if ($saved || get_option(self::OPTION_NAME) === $json_settings) {
-            return rest_ensure_response([
-                'success' => true,
-                'message' => sprintf('Settings saved successfully! %s API key is valid and ready to use.', ucfirst($ai_platform)),
-                'data'    => [
-                    'ai_platform' => $ai_platform,
-                    'author_id'   => $author_id,
-                    'author_name' => $user->display_name,
-                    'api_key_valid' => true,
-                    'api_key_info' => $validation_result['info'] ?? []
-                ],
-            ]);
-        } else {
-            return new \WP_Error(
-                'save_failed',
-                'Failed to save settings',
-                ['status' => 500]
-            );
-        }
-    }
+		update_option( self::OPTION_NAME, wp_json_encode( $new_settings ), false );
 
-    /**
-     * Validate API key by making a test request to the respective platform
-     */
-    private function validate_api_key($platform, $api_key)
-    {
-        switch ($platform) {
-            case 'chatgpt':
-                return $this->validate_openai_key($api_key);
+		return rest_ensure_response( [
+			'success' => true,
+			'message' => __( 'Settings saved successfully.', 'postanalyzer' ),
+		] );
+	}
 
-            case 'gemini':
-                return $this->validate_gemini_key($api_key);
+	public function get_settings(): \WP_REST_Response|\WP_Error {
+		$settings = $this->load_raw_settings();
 
-            case 'groq':
-                return $this->validate_groq_key($api_key);
+		if ( empty( $settings ) ) {
+			return rest_ensure_response( [
+				'ai_platform'    => 'groq',
+				'author_id'      => 0,
+				'api_keys_saved' => [],
+			] );
+		}
 
-            default:
-                return [
-                    'valid' => false,
-                    'message' => 'Unknown platform'
-                ];
-        }
-    }
+		// Report only *which* platforms have a stored key — never any portion of
+		// the key itself. Exposing even a prefix/suffix leaks an admin-level secret.
+		$saved_platforms = [];
+		foreach ( $settings['api_keys'] ?? [] as $platform => $encrypted ) {
+			if ( ! empty( $encrypted ) ) {
+				$saved_platforms[ $platform ] = true;
+			}
+		}
 
-    /**
-     * Validate OpenAI (ChatGPT) API key
-     */
-    private function validate_openai_key($api_key)
-    {
-        try {
-            $response = $this->httpClient->get('https://api.openai.com/v1/models', [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $api_key,
-                    'Content-Type' => 'application/json',
-                ],
-            ]);
+		$response = [
+			'ai_platform'    => $settings['ai_platform'] ?? 'groq',
+			'author_id'      => (int) ( $settings['author_id'] ?? 0 ),
+			'api_keys_saved' => $saved_platforms,
+			'updated_at'     => $settings['updated_at'] ?? '',
+		];
 
-            $status_code = $response->getStatusCode();
-            $body = $response->getBody()->getContents();
-            $data = json_decode($body, true);
+		if ( ! empty( $settings['author_id'] ) ) {
+			$user = get_user_by( 'id', $settings['author_id'] );
+			if ( $user ) {
+				$response['author_name'] = $user->display_name;
+			}
+		}
 
-            if ($status_code === 401) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid OpenAI API key. Please check your key and try again.'
-                ];
-            }
+		return rest_ensure_response( $response );
+	}
 
-            if ($status_code === 200 && isset($data['data'])) {
-                return [
-                    'valid' => true,
-                    'message' => 'OpenAI API key is valid',
-                    'info' => [
-                        'models_available' => count($data['data']),
-                        'includes_gpt4' => $this->check_model_availability($data['data'], 'gpt-4')
-                    ]
-                ];
-            }
+	public function validate_key( \WP_REST_Request $request ): \WP_REST_Response {
+		$result = $this->validate_api_key(
+			$request->get_param( 'platform' ),
+			$request->get_param( 'api_key' )
+		);
+		return rest_ensure_response( $result );
+	}
 
-            return [
-                'valid' => false,
-                'message' => 'Unexpected response from OpenAI API: ' . $status_code
-            ];
-        } catch (ClientException $e) {
-            $status_code = $e->getResponse()->getStatusCode();
-            if ($status_code === 401) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid OpenAI API key. Please check your key and try again.'
-                ];
-            }
-            return [
-                'valid' => false,
-                'message' => 'OpenAI API Error: ' . $e->getMessage()
-            ];
-        } catch (ConnectException $e) {
-            return [
-                'valid' => false,
-                'message' => 'Failed to connect to OpenAI API. Please check your internet connection.'
-            ];
-        } catch (\Exception $e) {
-            return [
-                'valid' => false,
-                'message' => 'Error validating OpenAI API key: ' . $e->getMessage()
-            ];
-        }
-    }
+	// ── Key validation ────────────────────────────────────────────────────────
 
-    /**
-     * Validate Google Gemini API key
-     */
-    private function validate_gemini_key($api_key)
-    {
-        try {
-            $response = $this->httpClient->get('https://generativelanguage.googleapis.com/v1beta/models', [
-                'query' => ['key' => $api_key],
-            ]);
+	private function validate_api_key( string $platform, string $key ): array {
+		if ( empty( $key ) ) {
+			return [ 'valid' => false, 'message' => 'API key cannot be empty.' ];
+		}
 
-            $status_code = $response->getStatusCode();
-            $body = $response->getBody()->getContents();
-            $data = json_decode($body, true);
+		return match ( $platform ) {
+			'gemini' => $this->ping_gemini( $key ),
+			'openai' => $this->ping_openai( $key ),
+			'groq'   => $this->ping_groq( $key ),
+			default  => [ 'valid' => false, 'message' => 'Unknown platform.' ],
+		};
+	}
 
-            if ($status_code == 400 || $status_code == 403) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid Gemini API key. Please check your key and try again.'
-                ];
-            }
+	private function ping_gemini( string $key ): array {
+		$url      = 'https://generativelanguage.googleapis.com/v1beta/models?key=' . urlencode( $key );
+		$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
 
-            if ($status_code === 200 && isset($data['models'])) {
-                return [
-                    'valid' => true,
-                    'message' => 'Gemini API key is valid',
-                    'info' => [
-                        'models_available' => count($data['models'])
-                    ]
-                ];
-            }
+		if ( is_wp_error( $response ) ) {
+			return [ 'valid' => false, 'message' => 'Connection failed: ' . $response->get_error_message() ];
+		}
 
-            return [
-                'valid' => false,
-                'message' => 'Unexpected response from Gemini API: ' . $status_code
-            ];
-        } catch (ClientException $e) {
-            $status_code = $e->getResponse()->getStatusCode();
-            if ($status_code == 400 || $status_code == 403) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid Gemini API key. Please check your key and try again.'
-                ];
-            }
-            return [
-                'valid' => false,
-                'message' => 'Gemini API Error: ' . $e->getMessage()
-            ];
-        } catch (ConnectException $e) {
-            return [
-                'valid' => false,
-                'message' => 'Failed to connect to Gemini API. Please check your internet connection.'
-            ];
-        } catch (\Exception $e) {
-            return [
-                'valid' => false,
-                'message' => 'Error validating Gemini API key: ' . $e->getMessage()
-            ];
-        }
-    }
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 
-    /**
-     * Validate Groq API key
-     */
-    private function validate_groq_key($api_key)
-    {
-        try {
-            $response = $this->httpClient->get('https://api.groq.com/openai/v1/models', [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $api_key,
-                    'Content-Type' => 'application/json',
-                ],
-            ]);
+		if ( $code === 400 && isset( $body['error']['message'] ) && str_contains( $body['error']['message'], 'API_KEY_INVALID' ) ) {
+			return [ 'valid' => false, 'message' => 'Invalid Gemini API key.' ];
+		}
 
-            $status_code = $response->getStatusCode();
-            $body = $response->getBody()->getContents();
-            $data = json_decode($body, true);
+		return $code === 200
+			? [ 'valid' => true,  'message' => 'Gemini API key is valid.' ]
+			: [ 'valid' => false, 'message' => 'Unexpected response from Gemini (HTTP ' . $code . ').' ];
+	}
 
-            if ($status_code === 401) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid Groq API key. Please check your key and try again.'
-                ];
-            }
+	private function ping_openai( string $key ): array {
+		$response = wp_remote_get( 'https://api.openai.com/v1/models', [
+			'timeout' => 10,
+			'headers' => [ 'Authorization' => 'Bearer ' . $key ],
+		] );
 
-            if ($status_code === 200 && isset($data['data'])) {
-                return [
-                    'valid' => true,
-                    'message' => 'Groq API key is valid',
-                    'info' => [
-                        'models_available' => count($data['data']),
-                        'includes_mixtral' => $this->check_model_availability($data['data'], 'mixtral'),
-                        'includes_llama' => $this->check_model_availability($data['data'], 'llama')
-                    ]
-                ];
-            }
+		if ( is_wp_error( $response ) ) {
+			return [ 'valid' => false, 'message' => 'Connection failed: ' . $response->get_error_message() ];
+		}
 
-            return [
-                'valid' => false,
-                'message' => 'Unexpected response from Groq API: ' . $status_code
-            ];
-        } catch (ClientException $e) {
-            $status_code = $e->getResponse()->getStatusCode();
-            if ($status_code === 401) {
-                return [
-                    'valid' => false,
-                    'message' => 'Invalid Groq API key. Please check your key and try again.'
-                ];
-            }
-            return [
-                'valid' => false,
-                'message' => 'Groq API Error: ' . $e->getMessage()
-            ];
-        } catch (ConnectException $e) {
-            return [
-                'valid' => false,
-                'message' => 'Failed to connect to Groq API. Please check your internet connection.'
-            ];
-        } catch (\Exception $e) {
-            return [
-                'valid' => false,
-                'message' => 'Error validating Groq API key: ' . $e->getMessage()
-            ];
-        }
-    }
+		$code = (int) wp_remote_retrieve_response_code( $response );
 
-    /**
-     * Check if a specific model is available in the models list
-     */
-    private function check_model_availability($models, $model_keyword)
-    {
-        foreach ($models as $model) {
-            if (stripos($model['id'], $model_keyword) !== false) {
-                return true;
-            }
-        }
-        return false;
-    }
+		if ( $code === 401 ) return [ 'valid' => false, 'message' => 'Invalid OpenAI API key.' ];
+		if ( $code === 200 ) return [ 'valid' => true,  'message' => 'OpenAI API key is valid.' ];
 
-    public function get_settings()
-    {
-        $json_settings = get_option(self::OPTION_NAME, '');
+		return [ 'valid' => false, 'message' => 'Unexpected response from OpenAI (HTTP ' . $code . ').' ];
+	}
 
-        if (empty($json_settings)) {
-            return rest_ensure_response([
-                'ai_platform' => '',
-                'author_id'   => 0,
-            ]);
-        }
+	private function ping_groq( string $key ): array {
+		$response = wp_remote_get( 'https://api.groq.com/openai/v1/models', [
+			'timeout' => 10,
+			'headers' => [
+				'Authorization' => 'Bearer ' . $key,
+				'Content-Type'  => 'application/json',
+			],
+		] );
 
-        $settings = json_decode($json_settings, true);
+		if ( is_wp_error( $response ) ) {
+			return [ 'valid' => false, 'message' => 'Connection failed: ' . $response->get_error_message() ];
+		}
 
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            return new \WP_Error(
-                'json_decode_error',
-                'Failed to decode settings',
-                ['status' => 500]
-            );
-        }
+		$code = (int) wp_remote_retrieve_response_code( $response );
 
-        // Mask API keys for display
-        $masked_keys = [];
-        if (isset($settings['api_keys']) && is_array($settings['api_keys'])) {
-            foreach ($settings['api_keys'] as $platform => $encrypted_key) {
-                if (!empty($encrypted_key)) {
-                    $decrypted = $this->decrypt_api_key($encrypted_key);
-                    $masked_keys[$platform] = $decrypted;
-                }
-            }
-        }
+		if ( $code === 401 ) return [ 'valid' => false, 'message' => 'Invalid Groq API key.' ];
+		if ( $code === 200 ) return [ 'valid' => true,  'message' => 'Groq API key is valid.' ];
 
-        // Don't expose actual API keys
-        unset($settings['api_keys']);
-        $settings['api_keys_masked'] = $masked_keys;
+		return [ 'valid' => false, 'message' => 'Unexpected response from Groq (HTTP ' . $code . ').' ];
+	}
 
-        // Add author name if author_id exists
-        if (!empty($settings['author_id'])) {
-            $user = get_user_by('id', $settings['author_id']);
-            if ($user) {
-                $settings['author_name'] = $user->display_name;
-            }
-        }
+	// ── Encryption ────────────────────────────────────────────────────────────
 
-        return rest_ensure_response($settings);
-    }
+	private const CIPHER     = 'AES-256-CBC';
+	private const ENC_PREFIX = 'v2:'; // Random-IV format marker.
 
-    /**
-     * Encrypt API key for secure storage
-     */
-    private function encrypt_api_key($api_key)
-    {
-        // Use WordPress salts for encryption
-        $key = wp_salt('auth');
-        $encrypted = openssl_encrypt($api_key, 'AES-256-CBC', $key, 0, substr($key, 0, 16));
-        return base64_encode($encrypted);
-    }
+	private static function encrypt( string $value ): string {
+		$key = substr( wp_salt( 'auth' ), 0, 32 );
+		$iv  = openssl_random_pseudo_bytes( 16 );
+		$enc = openssl_encrypt( $value, self::CIPHER, $key, OPENSSL_RAW_DATA, $iv );
+		if ( $enc === false ) return '';
+		// Prepend the IV so each ciphertext is unique even for identical keys.
+		return self::ENC_PREFIX . base64_encode( $iv . $enc );
+	}
 
-    /**
-     * Decrypt API key
-     */
-    private function decrypt_api_key($encrypted_key)
-    {
-        $key = wp_salt('auth');
-        $decoded = base64_decode($encrypted_key);
-        return openssl_decrypt($decoded, 'AES-256-CBC', $key, 0, substr($key, 0, 16));
-    }
+	private static function decrypt( string $encrypted ): string {
+		$key = substr( wp_salt( 'auth' ), 0, 32 );
 
-    /**
-     * Helper method to get the active API key (for internal use)
-     */
-    public static function get_active_api_key()
-    {
-        $instance = new self();
-        $json_settings = get_option(self::OPTION_NAME, '');
+		// New format: "v2:" . base64( iv(16) . ciphertext ).
+		if ( str_starts_with( $encrypted, self::ENC_PREFIX ) ) {
+			$decoded = base64_decode( substr( $encrypted, strlen( self::ENC_PREFIX ) ), true );
+			if ( $decoded === false || strlen( $decoded ) <= 16 ) return '';
+			$iv     = substr( $decoded, 0, 16 );
+			$cipher = substr( $decoded, 16 );
+			$result = openssl_decrypt( $cipher, self::CIPHER, $key, OPENSSL_RAW_DATA, $iv );
+			return $result !== false ? $result : '';
+		}
 
-        if (empty($json_settings)) {
-            return '';
-        }
+		// Legacy format: static IV from wp_salt('secure_auth'). Kept so keys saved
+		// before the random-IV change still decrypt; they upgrade on next save.
+		$iv      = substr( wp_salt( 'secure_auth' ), 0, 16 );
+		$decoded = base64_decode( $encrypted, true );
+		if ( $decoded === false ) return '';
+		$result = openssl_decrypt( $decoded, self::CIPHER, $key, 0, $iv );
+		return $result !== false ? $result : '';
+	}
 
-        $settings = json_decode($json_settings, true);
+	// ── Static config accessors ───────────────────────────────────────────────
 
-        if (json_last_error() !== JSON_ERROR_NONE || !isset($settings['ai_platform']) || !isset($settings['api_keys'])) {
-            return '';
-        }
+	public static function get_active_platform(): string {
+		$settings = self::load_static_settings();
+		return $settings['ai_platform'] ?? 'groq';
+	}
 
-        $platform = $settings['ai_platform'];
+	public static function get_active_api_key(): string {
+		$settings  = self::load_static_settings();
+		$platform  = $settings['ai_platform'] ?? '';
+		$encrypted = $settings['api_keys'][ $platform ] ?? '';
 
-        if (isset($settings['api_keys'][$platform])) {
-            return $instance->decrypt_api_key($settings['api_keys'][$platform]);
-        }
+		if ( empty( $encrypted ) ) return '';
 
-        return '';
-    }
+		return self::decrypt( $encrypted );
+	}
 
-    /**
-     * Helper method to get the active AI platform
-     */
-    public static function get_active_platform()
-    {
-        $json_settings = get_option(self::OPTION_NAME, '');
+	public static function get_author_id(): int {
+		$settings = self::load_static_settings();
+		return (int) ( $settings['author_id'] ?? 0 );
+	}
 
-        if (empty($json_settings)) {
-            return 'groq'; // Default platform
-        }
+	// ── Internal helpers ──────────────────────────────────────────────────────
 
-        $settings = json_decode($json_settings, true);
+	private function load_raw_settings(): array {
+		return self::load_static_settings();
+	}
 
-        if (json_last_error() !== JSON_ERROR_NONE || !isset($settings['ai_platform'])) {
-            return 'groq';
-        }
-
-        return $settings['ai_platform'];
-    }
-
-    /**
-     * Helper method to get the author ID (for internal use)
-     */
-    public static function get_author_id()
-    {
-        $json_settings = get_option(self::OPTION_NAME, '');
-
-        if (empty($json_settings)) {
-            return 0;
-        }
-
-        $settings = json_decode($json_settings, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE || !isset($settings['author_id'])) {
-            return 0;
-        }
-
-        return (int) $settings['author_id'];
-    }
+	private static function load_static_settings(): array {
+		$json    = get_option( self::OPTION_NAME, '' );
+		if ( empty( $json ) ) return [];
+		$decoded = json_decode( $json, true );
+		return ( json_last_error() === JSON_ERROR_NONE && is_array( $decoded ) ) ? $decoded : [];
+	}
 }

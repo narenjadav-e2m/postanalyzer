@@ -1,15 +1,19 @@
 {
     "name": "e2msolutions/postanalyzer",
-    "description": "PostAnalyzer plugin",
+    "description": "PostAnalyzer – Automated SEO, accessibility, and content QA audits for WordPress posts.",
     "type": "wordpress-plugin",
-    "version": "1.0.0",
+    "license": "GPL-2.0-or-later",
     "require": {
-        "guzzlehttp/guzzle": "^7.10"
+        "php": ">=8.1"
     },
     "autoload": {
         "psr-4": {
-            "PostAnalyzer\\API\\": "api/",
-            "PostAnalyzer\\": "includes/"
+            "PostAnalyzer\\": "includes/",
+            "PostAnalyzer\\API\\": "api/"
         }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
     }
 }

@@ -2,85 +2,76 @@
 
 namespace PostAnalyzer\API;
 
-defined('ABSPATH') || exit;
+defined( 'ABSPATH' ) || exit;
 
 /**
- * REST endpoint that returns a list of users for the admin UI dropdown.
+ * REST endpoint: GET /wp-json/postanalyzer/v1/users
+ *
+ * @package PostAnalyzer
+ * @since   2.0.0
  */
-class Users
-{
-    public function __construct()
-    {
-        add_action('rest_api_init', [$this, 'register_routes']);
-    }
+class Users {
 
-    public function register_routes()
-    {
-        register_rest_route(
-            'postanalyzer/v1',
-            '/users',
-            [
-                'methods'             => 'GET',
-                'callback'            => [$this, 'get_users'],
-                // Allow editors/admins to use the users endpoint in the admin UI
-                'permission_callback' => function () {
-                    return current_user_can('edit_posts');
-                },
-                'args' => [
-                    'per_page' => [
-                        'required' => false,
-                        'type'     => 'integer',
-                        'default'  => 100,
-                    ],
-                    'role' => [
-                        'required' => false,
-                        'type'     => 'string',
-                        'default'  => '',
-                    ],
-                ],
-            ]
-        );
-    }
+	public function __construct() {
+		add_action( 'rest_api_init', [ $this, 'register_routes' ] );
+	}
 
-    public function get_users($request)
-    {
-        $per_page = (int) $request->get_param('per_page');
-        $role = $request->get_param('role');
+	public function register_routes(): void {
+		register_rest_route(
+			'postanalyzer/v1',
+			'/users',
+			[
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => [ $this, 'get_users' ],
+				'permission_callback' => static fn() => current_user_can( 'manage_options' ),
+				'args'                => [
+					'per_page' => [
+						'type'              => 'integer',
+						'default'           => 100,
+						'minimum'           => 1,
+						'maximum'           => 500,
+						'sanitize_callback' => static fn( $v ) => abs( (int) $v ),
+					],
+					'role'     => [
+						'type'              => 'string',
+						'default'           => '',
+						'sanitize_callback' => static fn( $v ) => sanitize_key( (string) $v ),
+					],
+				],
+			]
+		);
+	}
 
-        $args = [
-            'orderby' => 'display_name',
-            'order'   => 'ASC',
-            'fields'  => ['ID', 'display_name', 'user_email', 'user_login'],
-        ];
+	public function get_users( \WP_REST_Request $request ): \WP_REST_Response {
+		$per_page = (int) $request->get_param( 'per_page' );
+		$role     = (string) $request->get_param( 'role' );
 
-        // Set number of users to return
-        if ($per_page > 0) {
-            $args['number'] = $per_page;
-        }
+		$args = [
+			'orderby' => 'display_name',
+			'order'   => 'ASC',
+			'number'  => $per_page,
+			'fields'  => [ 'ID', 'display_name', 'user_email', 'user_login' ],
+		];
 
-        // Filter by role if specified
-        if (!empty($role)) {
-            $args['role'] = $role;
-        } else {
-            // Default: get users who can publish posts (Authors, Editors, Admins)
-            $args['capability'] = ['publish_posts'];
-        }
+		if ( ! empty( $role ) ) {
+			$args['role'] = $role;
+		} else {
+			$args['capability'] = [ 'publish_posts' ];
+		}
 
-        $users_query = new \WP_User_Query($args);
-        $users = $users_query->get_results();
+		$users_query = new \WP_User_Query( $args );
+		$users       = $users_query->get_results();
 
-        $items = [];
+		$items = [];
+		foreach ( (array) $users as $user ) {
+			$items[] = [
+				'id'    => (int) $user->ID,
+				'name'  => $user->display_name ?: $user->user_login,
+				'email' => $user->user_email,
+				'login' => $user->user_login,
+			];
+		}
 
-        if (!empty($users)) {
-            foreach ($users as $user) {
-                $items[] = [
-                    'id'    => (int) $user->ID,
-                    'name'  => $user->display_name ?: $user->user_login,
-                    'email' => $user->user_email,
-                ];
-            }
-        }
-
-        return rest_ensure_response($items);
-    }
+		return rest_ensure_response( $items );
+	}
 }

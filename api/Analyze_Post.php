@@ -2,471 +2,330 @@
 
 namespace PostAnalyzer\API;
 
-defined('ABSPATH') || exit;
+defined( 'ABSPATH' ) || exit;
 
 /**
- * REST endpoint that analyzes a post and returns metadata, SEO info, images, and suggestions.
+ * REST endpoint: POST /wp-json/postanalyzer/v1/analyze-post
+ *
+ * @package PostAnalyzer
+ * @since   2.0.0
  */
-class Analyze_Post
-{
+class Analyze_Post {
 
-    public function __construct()
-    {
-        add_action('rest_api_init', [$this, 'register_routes']);
-    }
+	public function __construct() {
+		add_action( 'rest_api_init', [ $this, 'register_routes' ] );
+	}
 
-    public function register_routes()
-    {
-        register_rest_route('postanalyzer/v1', '/analyze-post', [
-            'methods'  => 'POST',
-            'callback' => [$this, 'analyze_post'],
-            'permission_callback' => function () {
-                return current_user_can('edit_posts'); // allow editors/admins
-            }
-        ]);
-    }
+	public function register_routes(): void {
+		register_rest_route(
+			'postanalyzer/v1',
+			'/analyze-post',
+			[
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => [ $this, 'handle' ],
+				'permission_callback' => static fn() => current_user_can( 'edit_posts' ),
+				'args'                => [
+					'post_id' => [
+						'required'          => true,
+						'type'              => 'integer',
+						'minimum'           => 1,
+						'sanitize_callback' => static fn( $v ) => abs( (int) $v ),
+					],
+				],
+			]
+		);
+	}
 
-    public function analyze_post($request)
-    {
-        $params = $request->get_json_params();
+	// ── Main handler ─────────────────────────────────────────────────────────
 
-        // Accept either post_id (preferred) or url (fallback)
-        $post_id = isset($params['post_id']) ? intval($params['post_id']) : 0;
+	public function handle( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$post_id = (int) $request->get_param( 'post_id' );
+		$post    = get_post( $post_id );
 
-        if ($post_id) {
-            $post = get_post($post_id);
-            if (!$post) {
-                return rest_ensure_response(['error' => 'Invalid post ID.']);
-            }
-            $url = get_the_permalink($post_id);
-            if (! $url) {
-                return rest_ensure_response(['error' => 'Could not resolve post URL.']);
-            }
-        }
+		if ( ! $post || ! in_array( $post->post_status, [ 'publish', 'pending', 'draft', 'private', 'future' ], true ) ) {
+			return new \WP_Error( 'invalid_post', __( 'Invalid or inaccessible post.', 'postanalyzer' ), [ 'status' => 404 ] );
+		}
 
-        if (!$url) {
-            return rest_ensure_response(['error' => 'No URL or post_id provided']);
-        }
+		// Object-level check: the route only verifies the generic edit_posts cap, so
+		// without this a contributor could analyze (and ship to the AI) other users'
+		// private or draft content they cannot edit.
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			return new \WP_Error( 'forbidden', __( 'You do not have permission to analyze this post.', 'postanalyzer' ), [ 'status' => 403 ] );
+		}
 
-        // Title
-        $title = get_the_title($post_id) ?: '';
-        $url = get_the_permalink($post_id) ?: '';
-        $excerpt = get_the_excerpt($post_id) ?: '';
+		$seo        = $this->collect_seo( $post_id );
+		$images     = $this->collect_images( $post );
+		$word_count = $this->count_words( $post->post_content );
 
-        // SEO meta tags
-        $seo_title = get_post_meta($post_id, 'rank_math_title', true);
-        $seo_description = get_post_meta($post_id, 'rank_math_description', true);
-        $seo_keywords = get_post_meta($post_id, 'rank_math_focus_keyword', true);
-        $robots_meta  = get_post_meta($post_id, 'rank_math_robots', true);
+		$ai = new AI_Helper();
 
-        // Handle possible serialized value from older versions
-        if (is_string($robots_meta)) {
-            $robots = array_map('trim', explode(',', $robots_meta));
-        } else {
-            $robots = is_array($robots_meta) ? $robots_meta : [];
-        }
-        $is_noindex  = in_array('noindex', $robots, true) ? 'yes' : 'no';
-        $is_nofollow = in_array('nofollow', $robots, true) ? 'yes' : 'no';
+		// Count missing alt text across attached images *and* the featured image.
+		$alt_pool = $images['attached'];
+		if ( ! empty( $images['featured'] ) ) {
+			$alt_pool[] = $images['featured'];
+		}
+		$missing_alt = $this->count_missing_alt( $alt_pool );
 
-        // Basic post info heuristics
-        $author = $post_id ? get_the_author_meta('display_name', $post->post_author) : null;
-        $published = $post_id ? get_the_date('F j, Y g:i A', $post_id) : null;
-        $updated = $post_id ? get_the_modified_date('F j, Y g:i A', $post_id) : null;
+		$url_suggestions = $ai->generate_url_suggestions( [
+			'post_id'  => $post_id,
+			'title'    => $post->post_title,
+			'content'  => $post->post_content,
+			'keywords' => $seo['keywords'],
+		] );
 
-        // Word count
-        // Get post content
-        $content = get_post_field('post_content', $post_id);
+		$ai_suggestions = $ai->generate_ai_suggestions( [
+			'title'              => $post->post_title,
+			'excerpt'            => get_the_excerpt( $post ),
+			'content'            => $post->post_content,
+			'seo_title'          => $seo['title'],
+			'seo_description'    => $seo['description'],
+			'keywords'           => $seo['keywords'],
+			'word_count'         => $word_count,
+			'has_featured_image' => ! empty( $images['featured'] ),
+			'missing_alt_count'  => $missing_alt,
+		] );
 
-        // Remove shortcodes, strip HTML tags, and trim
-        $clean_content = trim(strip_tags(strip_shortcodes($content)));
+		if ( is_wp_error( $url_suggestions ) ) {
+			$url_suggestions = [];
+		}
+		if ( is_wp_error( $ai_suggestions ) ) {
+			$ai_suggestions = [ 'AI suggestions unavailable: ' . $ai_suggestions->get_error_message() ];
+		}
 
-        // Count words
-        $word_count = str_word_count($clean_content);
+		$response = [
+			'url'             => get_the_permalink( $post_id ) ?: '',
+			'title'           => get_the_title( $post_id ),
+			'excerpt'         => $post->post_excerpt,
+			'slug'            => $post->post_name,
+			'author'          => get_the_author_meta( 'display_name', $post->post_author ),
+			'published_date'  => get_the_date( 'F j, Y g:i A', $post_id ),
+			'updated_date'    => get_the_modified_date( 'F j, Y g:i A', $post_id ),
+			'post_status'     => $post->post_status,
+			'post_type'       => $post->post_type,
+			'categories'      => get_the_category_list( ', ', '', $post_id ) ?: '',
+			'tags'            => get_the_tag_list( '', ', ', '', $post_id ) ?: '',
+			'word_count'      => $word_count,
+			'seo'             => $seo,
+			'featured_image'  => $images['featured'],
+			'attached_images' => $images['attached'],
+			'url_suggestions' => $url_suggestions,
+			'ai_suggestions'  => $ai_suggestions,
+		];
 
-        // Featured image
-        $thumbnail_id = get_post_thumbnail_id($post_id);
+		$response = \PostAnalyzer\Plugin::recursive_html_entity_decode( $response );
 
-        if ($thumbnail_id) {
-            $featured_url  = wp_get_attachment_url($thumbnail_id);
-            $metadata      = wp_get_attachment_metadata($thumbnail_id);
+		return rest_ensure_response( $response );
+	}
 
-            $featured_image = [
-                'id'          => $thumbnail_id,
-                'src'         => $featured_url,
-                'alt'         => get_post_meta($thumbnail_id, '_wp_attachment_image_alt', true),
-                'title'       => get_the_title($thumbnail_id),
-                'caption'     => wp_get_attachment_caption($thumbnail_id),
-                'description' => get_post_field('post_content', $thumbnail_id),
-                'filename'    => basename($featured_url),
-                'width'       => $metadata['width'] ?? null,
-                'height'      => $metadata['height'] ?? null,
-                'type'        => 'media-library',
-                'mime_type'   => get_post_mime_type($thumbnail_id),
-                'sizes'       => $metadata['sizes'] ?? [],
-                'image_meta'  => isset($metadata['image_meta']) ? $metadata['image_meta'] : null,
-                'upload_date' => get_the_date('F j, Y g:i A', $thumbnail_id),
-            ];
-        } else {
-            $featured_image = null;
-        }
+	// ── SEO ───────────────────────────────────────────────────────────────────
 
+	private function collect_seo( int $post_id ): array {
+		$seo_title  = (string) get_post_meta( $post_id, 'rank_math_title', true );
+		$seo_desc   = (string) get_post_meta( $post_id, 'rank_math_description', true );
+		$focus_kw   = (string) get_post_meta( $post_id, 'rank_math_focus_keyword', true );
+		$robots_raw = get_post_meta( $post_id, 'rank_math_robots', true );
 
-        //attahced images
-        $attached_images = $this->fetch_attached_images($post_id)['unique_images'];
+		$robots = is_array( $robots_raw )
+			? $robots_raw
+			: array_filter( array_map( 'trim', explode( ',', (string) $robots_raw ) ) );
 
-        // SEO checks
-        $seo_issues = [];
-        if (empty($seo_title)) $seo_issues[] = 'Missing SEO title';
-        else {
-            $len = mb_strlen($seo_title);
-            if ($len < 30) $seo_issues[] = 'SEO title is short (<30 chars)';
-            if ($len > 70) $seo_issues[] = 'SEO title is long (>70 chars)';
-        }
-        if (empty($seo_description)) $seo_issues[] = 'Missing meta description';
-        else {
-            $len = mb_strlen($seo_description);
-            if ($len < 120) $seo_issues[] = 'Meta description is short (<120 chars)';
-            if ($len > 320) $seo_issues[] = 'Meta description is long (>320 chars)';
-        }
+		$keywords = $focus_kw
+			? array_values( array_filter( array_map( 'trim', explode( ',', $focus_kw ) ) ) )
+			: [];
 
-        // URL suggestions
-        $base_for_slug = $seo_title ?: $title ?: $url;
-        $slug_candidate = sanitize_title($base_for_slug);
-        $url_suggestions = [];
+		$issues = $this->evaluate_seo_issues( $seo_title, $seo_desc );
 
-        $gemini = new \PostAnalyzer\API\AI_Helper();
-        $url_suggestions = $gemini->generate_url_suggestions([
-            'title' => $post->post_title,
-            'content' => $post->post_content,
-            'keywords' => $seo_keywords,
-        ]);
+		return [
+			'title'         => $seo_title,
+			'description'   => $seo_desc,
+			'keywords'      => $keywords,
+			'focus_keyword' => $focus_kw,
+			'robots'      => array_values( $robots ),
+			'is_noindex'  => in_array( 'noindex',  $robots, true ) ? 'yes' : 'no',
+			'is_nofollow' => in_array( 'nofollow', $robots, true ) ? 'yes' : 'no',
+			'issues'      => $issues,
+			'score'       => $this->seo_score( $seo_title, $seo_desc, $keywords, $issues ),
+		];
+	}
 
-        // AI suggestions
-        // $ai_suggestions = [];
-        // if (!empty($seo_issues)) {
-        //     $ai_suggestions[] = 'Improve SEO title/description: make the title descriptive (50-60 chars) and meta description 150-160 chars with target keywords.';
-        // }
-        // if (empty($featured_image) && count($attached_images) === 0) {
-        //     $ai_suggestions[] = 'No images found: add a featured image and descriptive alt text to improve accessibility and SEO.';
-        // } else {
-        //     foreach ($attached_images as $a) {
-        //         if (empty($a['alt'])) {
-        //             $ai_suggestions[] = "Image {$a['filename']} is missing alt text.";
-        //             if (count($ai_suggestions) > 8) break;
-        //         }
-        //     }
-        // }
-        $missing_alt_count = 0;
-        if (!empty($attached_images)) {
-            foreach ($attached_images as $img) {
-                if (empty($img['alt'])) {
-                    $missing_alt_count++;
-                }
-            }
-        }
+	private function evaluate_seo_issues( string $seo_title, string $seo_desc ): array {
+		$issues = [];
 
-        $ai = new \PostAnalyzer\API\AI_Helper();
+		if ( $seo_title === '' ) {
+			$issues[] = __( 'Missing SEO title', 'postanalyzer' );
+		} else {
+			$len = mb_strlen( $seo_title );
+			if ( $len < 30 ) $issues[] = __( 'SEO title is too short (< 30 chars)', 'postanalyzer' );
+			if ( $len > 70 ) $issues[] = __( 'SEO title is too long (> 70 chars)', 'postanalyzer' );
+		}
 
-        $ai_suggestions = $ai->generate_ai_suggestions([
-            'title' => $post->post_title,
-            'excerpt' => $excerpt,
-            'content' => $post->post_content,
-            'seo_title' => $seo_title,
-            'seo_description' => $seo_description,
-            'keywords' => $seo_keywords,
-            'word_count' => $word_count,
-            'has_featured_image' => !empty($featured_image),
-            'missing_alt_count' => $missing_alt_count,
-        ]);
+		if ( $seo_desc === '' ) {
+			$issues[] = __( 'Missing meta description', 'postanalyzer' );
+		} else {
+			$len = mb_strlen( $seo_desc );
+			if ( $len < 120 ) $issues[] = __( 'Meta description is too short (< 120 chars)', 'postanalyzer' );
+			if ( $len > 320 ) $issues[] = __( 'Meta description is too long (> 320 chars)', 'postanalyzer' );
+		}
 
-        // If AI fails, keep a small fallback (optional but recommended)
-        if (is_wp_error($ai_suggestions)) {
-            $ai_suggestions = [
-                'AI suggestions unavailable: ' . $ai_suggestions->get_error_message(),
-            ];
-        }
+		return $issues;
+	}
 
-        $response = [
-            'url' => $url,
-            'title' => $title,
-            'author' => $author,
-            'published_date' => $published,
-            'updated_date' => $updated,
-            'categories' => get_the_category_list(', ', '', $post_id) ?: '',
-            'tags' => get_the_tag_list('', ', ', '', $post_id) ?: '',
-            'word_count' => $word_count,
-            'seo' => [
-                'title' => $seo_title,
-                'description' => $seo_description,
-                'keywords' => $seo_keywords ? array_map(fn($k) => trim($k), explode(',', $seo_keywords)) : [],
-                'issues' => $seo_issues
-            ],
-            'featured_image' => $featured_image,
-            'attached_images' => $attached_images,
-            'url_suggestions' => $url_suggestions,
-            'ai_suggestions' => $ai_suggestions,
-        ];
+	private function seo_score( string $title, string $desc, array $keywords, array $issues ): int {
+		$score = 100;
+		$score -= count( $issues ) * 15;
+		if ( empty( $keywords ) ) $score -= 10;
+		return max( 0, $score );
+	}
 
-        $response = \PostAnalyzer\Plugin::instance()->recursive_html_entity_decode($response);
+	// ── Word count ────────────────────────────────────────────────────────────
 
-        return rest_ensure_response($response);
-    }
+	private function count_words( string $content ): int {
+		$clean = trim( wp_strip_all_tags( strip_shortcodes( $content ) ) );
+		if ( $clean === '' ) {
+			return 0;
+		}
+		// Unicode-aware: str_word_count() undercounts CJK and other non-Latin scripts.
+		if ( preg_match_all( '/[\p{L}\p{N}]+/u', $clean, $m ) ) {
+			return count( $m[0] );
+		}
+		return str_word_count( $clean );
+	}
 
-    private function fetch_attached_images($post_id)
-    {
-        // Get post content
-        $post = get_post($post_id);
-        $post_content = $post->post_content;
+	// ── Images ────────────────────────────────────────────────────────────────
 
-        // First, get attached images (parent-child relationship)
-        $attachments = get_posts([
-            'post_type'      => 'attachment',
-            'posts_per_page' => -1,
-            'post_parent'    => $post_id,
-            'orderby'        => 'menu_order',
-            'order'          => 'ASC',
-            'post_mime_type' => 'image',
-        ]);
+	private function collect_images( \WP_Post $post ): array {
+		$post_id     = $post->ID;
+		$featured_id = (int) get_post_thumbnail_id( $post_id );
+		$featured    = $featured_id ? $this->attachment_data( $featured_id ) : null;
 
-        $attached_images = [];
-        $attachment_urls = []; // Track attachment URLs to avoid duplicates
+		$seen_ids  = $featured_id ? [ $featured_id ] : [];
+		$seen_srcs = [];
+		$attached  = [];
 
-        foreach ($attachments as $attachment) {
-            $image_data = $this->get_image_data_from_attachment($attachment->ID);
-            if ($image_data) {
-                $attached_images[] = $image_data;
-                $attachment_urls[] = $image_data['src'];
-            }
-        }
+		// 1. Parent-attached media library images.
+		$parent_ids = get_posts( [
+			'post_type'      => 'attachment',
+			'posts_per_page' => -1,
+			'post_parent'    => $post_id,
+			'post_mime_type' => 'image',
+			'fields'         => 'ids',
+		] );
 
-        // Now parse content for embedded images
-        $content_images = [];
+		foreach ( $parent_ids as $att_id ) {
+			$this->maybe_add_image( (int) $att_id, $attached, $seen_ids, $seen_srcs, $featured_id );
+		}
 
-        // Extract images from content using regex
-        preg_match_all('/<img[^>]+>/i', $post_content, $img_matches);
+		// 2. <img> tags in content.
+		if ( preg_match_all( '/<img[^>]+src=["\']([^"\']+)["\'][^>]*>/i', $post->post_content, $m ) ) {
+			foreach ( $m[1] as $src ) {
+				$att_id = (int) attachment_url_to_postid( $src );
+				if ( $att_id ) {
+					$this->maybe_add_image( $att_id, $attached, $seen_ids, $seen_srcs, $featured_id );
+				} else {
+					$norm = $this->normalize_url( $src );
+					if ( ! in_array( $norm, $seen_srcs, true ) ) {
+						$seen_srcs[] = $norm;
+						$attached[]  = [
+							'id'       => null,
+							'src'      => esc_url_raw( $src ),
+							'alt'      => '',
+							'title'    => '',
+							'caption'  => '',
+							'filename' => basename( (string) parse_url( $src, PHP_URL_PATH ) ),
+							'width'    => null,
+							'height'   => null,
+							'type'     => 'external',
+						];
+					}
+				}
+			}
+		}
 
-        if (!empty($img_matches[0])) {
-            foreach ($img_matches[0] as $img_tag) {
-                // Extract src
-                preg_match('/src=["\'](.*?)["\']/i', $img_tag, $src_match);
-                $src = isset($src_match[1]) ? $src_match[1] : '';
+		// 3. Gutenberg blocks.
+		if ( function_exists( 'has_blocks' ) && has_blocks( $post->post_content ) ) {
+			$this->images_from_blocks( parse_blocks( $post->post_content ), $attached, $seen_ids, $seen_srcs, $featured_id );
+		}
 
-                if (empty($src)) continue;
+		return [
+			'featured' => $featured,
+			'attached' => array_values( $attached ),
+		];
+	}
 
-                // Skip if this image is already in attachments
-                $is_attachment = false;
-                foreach ($attachment_urls as $att_url) {
-                    if ($this->urls_match($src, $att_url)) {
-                        $is_attachment = true;
-                        break;
-                    }
-                }
+	private function maybe_add_image( int $att_id, array &$list, array &$seen_ids, array &$seen_srcs, int $featured_id ): void {
+		if ( $att_id === $featured_id || in_array( $att_id, $seen_ids, true ) ) return;
+		$data = $this->attachment_data( $att_id );
+		if ( ! $data ) return;
+		$norm = $this->normalize_url( $data['src'] );
+		if ( in_array( $norm, $seen_srcs, true ) ) return;
+		$seen_ids[]  = $att_id;
+		$seen_srcs[] = $norm;
+		$list[]      = $data;
+	}
 
-                if ($is_attachment) continue;
+	private function images_from_blocks( array $blocks, array &$list, array &$seen_ids, array &$seen_srcs, int $featured_id ): void {
+		foreach ( $blocks as $block ) {
+			$name = $block['blockName'] ?? '';
 
-                // Try to get attachment ID from URL using WordPress function
-                $attachment_id = attachment_url_to_postid($src);
+			if ( $name === 'core/image' ) {
+				$att_id = (int) ( $block['attrs']['id'] ?? 0 );
+				if ( ! $att_id && ! empty( $block['innerHTML'] ) ) {
+					preg_match( '/wp-image-(\d+)/', $block['innerHTML'], $mx );
+					$att_id = isset( $mx[1] ) ? (int) $mx[1] : 0;
+				}
+				if ( $att_id ) $this->maybe_add_image( $att_id, $list, $seen_ids, $seen_srcs, $featured_id );
 
-                if ($attachment_id) {
-                    // Get data from database
-                    $image_data = $this->get_image_data_from_attachment($attachment_id);
-                    if ($image_data) {
-                        $content_images[] = $image_data;
-                    }
-                } else {
-                    // If we can't find in database, create minimal entry
-                    $content_images[] = [
-                        'id'          => null,
-                        'src'         => esc_url_raw($src),
-                        'alt'         => '',
-                        'title'       => '',
-                        'caption'     => '',
-                        'description' => '',
-                        'filename'    => basename(parse_url($src, PHP_URL_PATH)),
-                        'width'       => null,
-                        'height'      => null,
-                        'type'        => 'external'
-                    ];
-                }
-            }
-        }
+			} elseif ( $name === 'core/gallery' ) {
+				foreach ( ( $block['attrs']['ids'] ?? [] ) as $id ) {
+					$this->maybe_add_image( (int) $id, $list, $seen_ids, $seen_srcs, $featured_id );
+				}
+				if ( ! empty( $block['innerBlocks'] ) ) {
+					$this->images_from_blocks( $block['innerBlocks'], $list, $seen_ids, $seen_srcs, $featured_id );
+				}
 
-        // Also check for Gutenberg image blocks
-        if (has_blocks($post_content)) {
-            $blocks = parse_blocks($post_content);
-            $this->process_blocks_for_images($blocks, $content_images);
-        }
+			} elseif ( $name === 'core/media-text' && ! empty( $block['attrs']['mediaId'] ) ) {
+				$this->maybe_add_image( (int) $block['attrs']['mediaId'], $list, $seen_ids, $seen_srcs, $featured_id );
 
-        // Combine all images (attached + embedded)
-        $all_images = array_merge($attached_images, $content_images);
+			} elseif ( ! empty( $block['innerBlocks'] ) ) {
+				$this->images_from_blocks( $block['innerBlocks'], $list, $seen_ids, $seen_srcs, $featured_id );
+			}
+		}
+	}
 
-        // Remove featured image if it exists
-        $featured_image_id = get_post_thumbnail_id($post_id);
-        if ($featured_image_id) {
-            $all_images = array_filter($all_images, function ($img) use ($featured_image_id) {
-                return $img['id'] != $featured_image_id;
-            });
-        }
+	private function attachment_data( int $att_id ): ?array {
+		if ( get_post_type( $att_id ) !== 'attachment' ) return null;
+		$att      = get_post( $att_id );
+		if ( ! $att ) return null;
+		$url      = wp_get_attachment_url( $att_id );
+		$meta     = wp_get_attachment_metadata( $att_id );
+		$alt      = get_post_meta( $att_id, '_wp_attachment_image_alt', true );
+		$filepath = get_attached_file( $att_id );
 
-        // Remove duplicates based on ID (primary) or src (fallback)
-        $unique_images = [];
-        $seen_ids = [];
-        $seen_srcs = [];
+		return [
+			'id'          => $att_id,
+			'src'         => $url ?: '',
+			'alt'         => (string) $alt,
+			'title'       => $att->post_title ?: '',
+			'caption'     => $att->post_excerpt ?: '',
+			'description' => $att->post_content ?: '',
+			'filename'    => $filepath ? basename( $filepath ) : basename( $url ?: '' ),
+			'width'       => $meta['width']  ?? null,
+			'height'      => $meta['height'] ?? null,
+			'type'        => 'media-library',
+			'mime_type'   => $att->post_mime_type,
+			'file_size'   => ( $filepath && file_exists( $filepath ) ) ? filesize( $filepath ) : null,
+			'upload_date' => $att->post_date,
+			'sizes'       => isset( $meta['sizes'] ) ? array_keys( $meta['sizes'] ) : [],
+		];
+	}
 
-        foreach ($all_images as $image) {
-            // Skip if we've seen this ID
-            if ($image['id'] && in_array($image['id'], $seen_ids)) {
-                continue;
-            }
+	private function normalize_url( string $url ): string {
+		$url    = preg_replace( '/-\d+x\d+(\.[^.]+)$/', '$1', $url );
+		$parsed = parse_url( $url );
+		return ( $parsed['scheme'] ?? 'https' ) . '://' . ( $parsed['host'] ?? '' ) . ( $parsed['path'] ?? '' );
+	}
 
-            // Skip if we've seen this URL (normalized)
-            $normalized_src = $this->normalize_image_url($image['src']);
-            if (in_array($normalized_src, $seen_srcs)) {
-                continue;
-            }
-
-            $unique_images[$image['id']] = $image;
-            if ($image['id']) {
-                $seen_ids[] = $image['id'];
-            }
-            $seen_srcs[] = $normalized_src;
-        }
-
-        return ['unique_images' => $unique_images, 'seen_srcs' => $seen_srcs];
-    }
-
-    /**
-     * Get complete image data from attachment ID
-     */
-    private function get_image_data_from_attachment($attachment_id)
-    {
-        // Verify it's a valid attachment
-        if (get_post_type($attachment_id) !== 'attachment') {
-            return null;
-        }
-
-        // Get attachment post object
-        $attachment = get_post($attachment_id);
-        if (!$attachment) {
-            return null;
-        }
-
-        // Get metadata using WordPress functions
-        $metadata = wp_get_attachment_metadata($attachment_id);
-        $url = wp_get_attachment_url($attachment_id);
-        $alt_text = get_post_meta($attachment_id, '_wp_attachment_image_alt', true);
-        $file_path = get_attached_file($attachment_id);
-
-        // Get image size info
-        $upload_dir = wp_upload_dir();
-        $file_info = pathinfo($file_path);
-
-        return [
-            'id'          => $attachment_id,
-            'src'         => $url,
-            'alt'         => $alt_text ?: '',
-            'title'       => $attachment->post_title ?: '',
-            'caption'     => $attachment->post_excerpt ?: '',
-            'description' => $attachment->post_content ?: '',
-            'filename'    => basename($file_path),
-            'width'       => isset($metadata['width']) ? $metadata['width'] : null,
-            'height'      => isset($metadata['height']) ? $metadata['height'] : null,
-            'type'        => 'media-library',
-            'mime_type'   => $attachment->post_mime_type,
-            'file_size'   => file_exists($file_path) ? filesize($file_path) : null,
-            'upload_date' => $attachment->post_date,
-            'image_meta'  => isset($metadata['image_meta']) ? $metadata['image_meta'] : null,
-            'sizes'       => isset($metadata['sizes']) ? array_keys($metadata['sizes']) : []
-        ];
-    }
-
-    /**
-     * Process Gutenberg blocks for images
-     */
-    private function process_blocks_for_images($blocks, &$content_images)
-    {
-        foreach ($blocks as $block) {
-            if ($block['blockName'] === 'core/image') {
-                $attachment_id = isset($block['attrs']['id']) ? $block['attrs']['id'] : null;
-
-                // If no ID in attributes, try to extract from innerHTML
-                if (!$attachment_id && !empty($block['innerHTML'])) {
-                    preg_match('/wp-image-(\d+)/', $block['innerHTML'], $matches);
-                    if (isset($matches[1])) {
-                        $attachment_id = intval($matches[1]);
-                    }
-                }
-
-                if ($attachment_id) {
-                    $image_data = $this->get_image_data_from_attachment($attachment_id);
-                    if ($image_data && !in_array($image_data['id'], array_column($content_images, 'id'))) {
-                        $content_images[] = $image_data;
-                    }
-                } else {
-                    // Try to get URL from innerHTML and then get attachment ID
-                    preg_match('/src=["\'](.*?)["\']/i', $block['innerHTML'], $src_match);
-                    if (isset($src_match[1])) {
-                        $attachment_id = attachment_url_to_postid($src_match[1]);
-                        if ($attachment_id) {
-                            $image_data = $this->get_image_data_from_attachment($attachment_id);
-                            if ($image_data && !in_array($image_data['id'], array_column($content_images, 'id'))) {
-                                $content_images[] = $image_data;
-                            }
-                        }
-                    }
-                }
-            } elseif ($block['blockName'] === 'core/gallery') {
-                // Process gallery images
-                if (isset($block['attrs']['ids']) && is_array($block['attrs']['ids'])) {
-                    foreach ($block['attrs']['ids'] as $attachment_id) {
-                        $image_data = $this->get_image_data_from_attachment($attachment_id);
-                        if ($image_data && !in_array($image_data['id'], array_column($content_images, 'id'))) {
-                            $content_images[] = $image_data;
-                        }
-                    }
-                }
-
-                // Also check innerBlocks for newer gallery format
-                if (isset($block['innerBlocks'])) {
-                    $this->process_blocks_for_images($block['innerBlocks'], $content_images);
-                }
-            } elseif ($block['blockName'] === 'core/media-text' && isset($block['attrs']['mediaId'])) {
-                // Handle media-text blocks
-                $attachment_id = $block['attrs']['mediaId'];
-                $image_data = $this->get_image_data_from_attachment($attachment_id);
-                if ($image_data && !in_array($image_data['id'], array_column($content_images, 'id'))) {
-                    $content_images[] = $image_data;
-                }
-            } elseif (isset($block['innerBlocks']) && !empty($block['innerBlocks'])) {
-                // Recursively process inner blocks (columns, groups, etc.)
-                $this->process_blocks_for_images($block['innerBlocks'], $content_images);
-            }
-        }
-    }
-
-    /**
-     * Check if two URLs refer to the same image
-     */
-    private function urls_match($url1, $url2)
-    {
-        $normalized1 = $this->normalize_image_url($url1);
-        $normalized2 = $this->normalize_image_url($url2);
-
-        return $normalized1 === $normalized2;
-    }
-
-    /**
-     * Normalize image URL by removing size suffixes and query strings
-     */
-    private function normalize_image_url($url)
-    {
-        // Remove size suffix (-300x200)
-        $url = preg_replace('/-\d+x\d+(\.[^.]+)$/', '$1', $url);
-
-        // Remove query strings
-        $parsed = parse_url($url);
-        $url = $parsed['scheme'] . '://' . $parsed['host'] . $parsed['path'];
-
-        return $url;
-    }
+	private function count_missing_alt( array $images ): int {
+		return count( array_filter( $images, static fn( $img ) => empty( $img['alt'] ) ) );
+	}
 }

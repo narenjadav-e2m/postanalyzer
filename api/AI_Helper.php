@@ -2,449 +2,500 @@
 
 namespace PostAnalyzer\API;
 
-defined('ABSPATH') || exit;
-
-class AI_Helper
-{
-    // Hardcoded endpoints + models (no Settings model options)
-    private string $gemini_endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-    private string $openai_endpoint = 'https://api.openai.com/v1/chat/completions';
-    private string $groq_endpoint   = 'https://api.groq.com/openai/v1/chat/completions';
-
-    private string $openai_model = 'gpt-4o-mini';
-    private string $groq_model   = 'llama-3.1-8b-instant';
-
-    private function request_by_active_platform(string $prompt, string $mode = 'slugs', int $retry = 2)
-    {
-        $platform = Settings::get_active_platform();
-
-        return match (strtolower((string)$platform)) {
-            'gemini' => $this->request_gemini($prompt, $mode, $retry),
-            'openai' => $this->request_openai($prompt, $mode, $retry),
-            'groq'   => $this->request_groq($prompt, $mode, $retry),
-            default  => new \WP_Error('unsupported_platform', 'Unsupported AI platform: ' . $platform),
-        };
-    }
-
-    /**
-     * @return array|\WP_Error Array of slug suggestions, or WP_Error on failure
-     */
-    public function generate_url_suggestions(array $ctx)
-    {
-        $prompt = $this->build_slug_prompt($ctx);
-        $slugs = $this->request_by_active_platform($prompt, 'slugs', 2);
-
-        if (is_wp_error($slugs)) return $slugs;
-
-        // convert slugs to full URLs (if you do this in helper)
-        return $this->slugs_to_urls($slugs, $ctx['post_id'] ?? 0);
-    }
-
-    public function generate_ai_suggestions(array $ctx)
-    {
-        $prompt = $this->build_suggestions_prompt($ctx);
-        return $this->request_by_active_platform($prompt, 'suggestions', 2);
-    }
-
-
-    private function request_gemini(string $prompt, string $mode = 'slugs', int $retry = 2)
-    {
-        $api_key = Settings::get_active_api_key();
-        $url = add_query_arg(['key' => $api_key], $this->gemini_endpoint);
-
-        $payload = [
-            'contents' => [[
-                'role'  => 'user',
-                'parts' => [['text' => $prompt]],
-            ]],
-            'generationConfig' => [
-                'temperature'     => 0.4,
-                'maxOutputTokens' => 700,
-            ],
-        ];
-
-        return $this->post_and_parse(
-            platform: 'gemini',
-            url: $url,
-            headers: ['Content-Type' => 'application/json'],
-            payload: $payload,
-            retry: $retry,
-            extract_text: fn(array $data) => $data['candidates'][0]['content']['parts'][0]['text'] ?? '',
-            mode: $mode
-        );
-    }
-
-    private function request_openai(string $prompt, string $mode = 'slugs', int $retry = 2)
-    {
-        $api_key = Settings::get_active_api_key();
-
-        $payload = [
-            'model' => $this->openai_model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'Return ONLY valid JSON. No markdown.'],
-                ['role' => 'user', 'content' => $prompt],
-            ],
-            'temperature' => 0.4,
-            'max_tokens'  => 700,
-        ];
-
-        return $this->post_and_parse(
-            platform: 'openai',
-            url: $this->openai_endpoint,
-            headers: [
-                'Content-Type'  => 'application/json',
-                'Authorization' => 'Bearer ' . $api_key,
-            ],
-            payload: $payload,
-            retry: $retry,
-            extract_text: fn(array $data) => $data['choices'][0]['message']['content'] ?? '',
-            mode: $mode
-        );
-    }
-
-    private function request_groq(string $prompt, string $mode = 'slugs', int $retry = 2)
-    {
-        $api_key = Settings::get_active_api_key();
-
-        $payload = [
-            'model' => $this->groq_model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'Return ONLY valid JSON. No markdown.'],
-                ['role' => 'user', 'content' => $prompt],
-            ],
-            'temperature' => 0.4,
-            'max_tokens'  => 700,
-            'response_format' => ['type' => 'json_object'],
-        ];
-
-        return $this->post_and_parse(
-            platform: 'groq',
-            url: $this->groq_endpoint,
-            headers: [
-                'Content-Type'  => 'application/json',
-                'Authorization' => 'Bearer ' . $api_key,
-            ],
-            payload: $payload,
-            retry: $retry,
-            extract_text: fn(array $data) => $data['choices'][0]['message']['content'] ?? '',
-            mode: $mode
-        );
-    }
-
-    /**
-     * Shared HTTP+retry+JSON parse.
-     *
-     * @param callable $extract_text fn(array $data): string
-     * @return array|\WP_Error
-     */
-    private function post_and_parse(
-        string $platform,
-        string $url,
-        array $headers,
-        array $payload,
-        int $retry,
-        callable $extract_text,
-        string $mode = 'slugs'
-    ) {
-        $attempt = 0;
-
-        do {
-            $attempt++;
-
-            $response = wp_remote_post($url, [
-                'timeout' => 20,
-                'headers' => $headers,
-                'body'    => wp_json_encode($payload),
-            ]);
-
-            if (is_wp_error($response)) {
-                if ($attempt > $retry) {
-                    return new \WP_Error($platform . '_http_error', $response->get_error_message());
-                }
-                continue;
-            }
-
-            $code = (int) wp_remote_retrieve_response_code($response);
-            $body = (string) wp_remote_retrieve_body($response);
-
-            if ($code < 200 || $code >= 300) {
-                if ($attempt > $retry) {
-                    return new \WP_Error(
-                        $platform . '_api_error',
-                        strtoupper($platform) . ' API request failed with status ' . $code,
-                        ['response_body' => $body]
-                    );
-                }
-                continue;
-            }
-
-            $data = json_decode($body, true);
-            if (!is_array($data)) {
-                if ($attempt > $retry) {
-                    return new \WP_Error($platform . '_bad_json', strtoupper($platform) . ' returned invalid JSON.', ['raw' => $body]);
-                }
-                continue;
-            }
-
-            $text = (string) $extract_text($data);
-
-            // More robust: handle JSON wrapped in extra text
-            $parsed = $this->extract_json_object($text) ?? $this->parse_ai_json($text);
-
-            if ($mode === 'slugs') {
-                $items = $parsed['suggestions'] ?? [];
-                if (is_array($items)) {
-                    $slugs = array_values(array_unique(array_filter(array_map('sanitize_title', $items))));
-                    if (!empty($slugs)) return $slugs;
-                }
-            } else { // suggestions mode
-                if ($mode === 'suggestions') {
-                    $items = $parsed['suggestions'] ?? [];
-                    if (is_array($items)) {
-
-                        $allowed = [
-                            'strong' => [],
-                            'em'     => [],
-                            'code'   => [],
-                            'br'     => [],
-                        ];
-
-                        $clean = array_values(array_filter(array_map(function ($s) use ($allowed) {
-                            $s = (string) $s;
-
-                            // Remove any disallowed HTML but keep <strong>/<em>/<code>/<br>
-                            $s = wp_kses($s, $allowed);
-
-                            // Trim + normalize spaces (don’t kill <br>)
-                            $s = trim(preg_replace('/[ \t]+/', ' ', $s));
-                            $s = preg_replace('/\s*\n\s*/', ' ', $s);
-
-                            // Optional: prevent bullet-looking output even if model slips
-                            $s = preg_replace('/^\s*[-•]+\s*/', '', $s);
-
-                            return $s;
-                        }, $items)));
-
-                        $clean = array_slice($clean, 0, 10);
-                        if (!empty($clean)) return $clean;
-                    }
-                }
-            }
-
-            if ($attempt > $retry) {
-                return new \WP_Error(
-                    $platform . '_no_valid_output',
-                    strtoupper($platform) . ' did not return valid output.',
-                    ['raw_text' => $text, 'mode' => $mode]
-                );
-            }
-        } while ($attempt <= $retry);
-
-        return new \WP_Error($platform . '_no_valid_output', 'AI did not return valid output');
-    }
-
-    private function build_slug_prompt(array $context): string
-    {
-        $title    = isset($context['title']) ? wp_strip_all_tags((string) $context['title']) : '';
-        $content  = isset($context['content']) ? wp_strip_all_tags((string) $context['content']) : '';
-        $keywords = isset($context['keywords']) ? (array) $context['keywords'] : [];
-
-        $keywords_str = implode(', ', array_map('sanitize_text_field', $keywords));
-
-        return
-            "You are an SEO assistant.\n" .
-            "Generate 5 SEO-friendly URL slugs for a WordPress post.\n\n" .
-            "Rules:\n" .
-            "- output ONLY valid JSON\n" .
-            "- no markdown, no backticks\n" .
-            "- JSON format: {\"suggestions\":[\"slug-one\",\"slug-two\",...]} \n" .
-            "- slugs must be lowercase, hyphen-separated, no special characters\n" .
-            "- each suggestion must be unique\n\n" .
-            "Title: {$title}\n" .
-            "Keywords: {$keywords_str}\n" .
-            "Content (excerpt): " . mb_substr($content, 0, 700);
-    }
-
-    /**
-     * Build prompt for AI suggestions.
-     */
-    private function build_suggestions_prompt(array $context): string
-    {
-        $title       = isset($context['title']) ? wp_strip_all_tags((string) $context['title']) : '';
-        $excerpt     = isset($context['excerpt']) ? wp_strip_all_tags((string) $context['excerpt']) : '';
-        $content     = isset($context['content']) ? wp_strip_all_tags((string) $context['content']) : '';
-        $seo_title   = isset($context['seo_title']) ? wp_strip_all_tags((string) $context['seo_title']) : '';
-        $seo_desc    = isset($context['seo_description']) ? wp_strip_all_tags((string) $context['seo_description']) : '';
-        $keywords    = $context['keywords'] ?? [];
-        $keywordsArr = is_array($keywords) ? $keywords : array_map('trim', explode(',', (string) $keywords));
-        $keywordsArr = array_values(array_filter(array_map('sanitize_text_field', $keywordsArr)));
-
-        $word_count  = isset($context['word_count']) ? (int) $context['word_count'] : 0;
-        $has_featured = !empty($context['has_featured_image']) ? 'yes' : 'no';
-        $missing_alt_count = isset($context['missing_alt_count']) ? (int) $context['missing_alt_count'] : 0;
-
-        $keywords_str = implode(', ', $keywordsArr);
-
-        return
-            $prompt =
-            "You are a senior SEO strategist and technical WordPress content auditor with 15+ years of experience in on-page SEO, content optimization, and search intent alignment.\n\n" .
-
-            "Your task is to analyze the provided WordPress post data and generate precise, high-impact, actionable improvements that increase:\n" .
-            "- Search engine rankings\n" .
-            "- Click-through rate (CTR)\n" .
-            "- Content depth and topical authority\n" .
-            "- Technical SEO quality\n" .
-            "- User engagement and readability\n\n" .
-
-            "Focus only on practical improvements that the editor can immediately apply.\n\n" .
-
-            "--------------------------------------------------\n" .
-            "OUTPUT RULES (STRICT — DO NOT VIOLATE):\n\n" .
-            "- Output ONLY valid JSON.\n" .
-            "- No markdown.\n" .
-            "- No explanations.\n" .
-            "- No extra text.\n" .
-            "- EXACT JSON structure:\n" .
-            "  {\"suggestions\":[\"...\",\"...\",\"...\"]}\n\n" .
-            "- 'suggestions' must contain 5 to 10 items.\n" .
-            "- Each suggestion MUST be a complete sentence.\n" .
-            "- Each suggestion MUST be INNER HTML only.\n" .
-            "- DO NOT wrap suggestions in <p>, <div>, <ul>, <li>, etc.\n" .
-            "- Allowed HTML tags ONLY: <strong>, <em>, <code>, <br>.\n" .
-            "- Do NOT use any other HTML tags.\n" .
-            "- No links.\n" .
-            "- No images.\n" .
-            "- No emojis.\n" .
-            "- No leading hyphens, bullets, or numbering.\n" .
-            "- Do NOT include any additional JSON keys.\n\n" .
-
-            "If data is missing, base suggestions only on available fields.\n\n" .
-
-            "--------------------------------------------------\n" .
-            "EVALUATION FRAMEWORK:\n\n" .
-
-            "1. Title Optimization\n" .
-            "   - Keyword placement\n" .
-            "   - Emotional triggers\n" .
-            "   - Power words\n" .
-            "   - Length optimization (50–60 characters ideal)\n\n" .
-
-            "2. Meta Description Optimization\n" .
-            "   - CTR improvement\n" .
-            "   - Clear benefit\n" .
-            "   - Call-to-action\n" .
-            "   - 150–160 characters target\n\n" .
-
-            "3. Keyword Usage\n" .
-            "   - Primary keyword presence in title, intro, subheadings\n" .
-            "   - Semantic keyword opportunities\n" .
-            "   - Keyword stuffing risks\n\n" .
-
-            "4. Content Quality\n" .
-            "   - Depth vs word count\n" .
-            "   - Missing sections\n" .
-            "   - Structural improvements (H2/H3 recommendations)\n" .
-            "   - Search intent alignment\n\n" .
-
-            "5. Internal SEO Signals\n" .
-            "   - Featured image usage\n" .
-            "   - Missing alt text issues\n" .
-            "   - Readability improvements\n" .
-            "   - Snippet optimization opportunities\n\n" .
-
-            "6. Engagement & Conversion\n" .
-            "   - Missing CTA\n" .
-            "   - FAQ opportunities\n" .
-            "   - Featured snippet formatting\n" .
-            "   - Suggest list formatting where useful (describe only, do not use <ul> tags)\n\n" .
-
-            "Only suggest improvements that are relevant to the provided data.\n" .
-            "Avoid generic advice like 'improve SEO' — every suggestion must be specific.\n\n" .
-
-            "--------------------------------------------------\n" .
-            "POST DATA:\n" .
-            "Title: {$title}\n" .
-            "Excerpt: {$excerpt}\n" .
-            "SEO Title: {$seo_title}\n" .
-            "SEO Description: {$seo_desc}\n" .
-            "Keywords: {$keywords_str}\n" .
-            "Word count: {$word_count}\n" .
-            "Has featured image: {$has_featured}\n" .
-            "Images missing alt text: {$missing_alt_count}\n\n" .
-
-            "--------------------------------------------------\n" .
-            "CONTENT (trimmed):\n" .
-            "{$content}";
-    }
-
-    /**
-     * Convert slug strings into absolute URLs.
-     *
-     * @param string[] $slugs
-     * @param int      $post_id Optional: used to preserve post type base in URL.
-     * @return string[]
-     */
-    private function slugs_to_urls(array $slugs, int $post_id = 0): array
-    {
-        $urls = [];
-
-        foreach ($slugs as $slug) {
-            $slug = sanitize_title($slug);
-            if ($slug === '') {
-                continue;
-            }
-
-            // Try to respect CPT rewrite base if post_id is provided.
-            if ($post_id > 0) {
-                $post = get_post($post_id);
-                if ($post) {
-                    $ptype = get_post_type_object($post->post_type);
-                    $rewrite_slug = $ptype->rewrite['slug'] ?? '';
-                    if (!empty($rewrite_slug)) {
-                        $urls[] = home_url('/' . trim($rewrite_slug, '/') . '/' . $slug . '/');
-                        continue;
-                    }
-                }
-            }
-
-            // Fallback: plain /{slug}/
-            $urls[] = home_url('/' . $slug . '/');
-        }
-
-        return array_values(array_unique($urls));
-    }
-
-    private function parse_ai_json(string $text): array
-    {
-        $text = trim($text);
-
-        // Remove markdown fences if provider adds them anyway
-        $text = preg_replace('/^```(json)?\s*/i', '', $text);
-        $text = preg_replace('/\s*```$/', '', $text);
-        $text = trim($text);
-
-        $json = json_decode($text, true);
-        return is_array($json) ? $json : [];
-    }
-
-    private function extract_json_object(string $text): ?array
-    {
-        $text = trim($text);
-
-        // Quick path
-        $decoded = json_decode($text, true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            return $decoded;
-        }
-
-        // Fallback: grab first {...}
-        if (preg_match('/\{(?:[^{}]|(?R))*\}/s', $text, $m)) {
-            $decoded = json_decode($m[0], true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                return $decoded;
-            }
-        }
-
-        return null;
-    }
+defined( 'ABSPATH' ) || exit;
+
+/**
+ * AI_Helper — unified AI platform abstraction.
+ *
+ * Supports: Gemini, OpenAI (ChatGPT), Groq.
+ * Handles: prompt building, HTTP dispatch, retry logic, JSON parsing.
+ *
+ * @package PostAnalyzer
+ * @since   2.0.0
+ */
+class AI_Helper {
+
+	// ── Platform endpoints & models ───────────────────────────────────────────
+
+	private const ENDPOINTS = [
+		'gemini' => 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+		'openai' => 'https://api.openai.com/v1/chat/completions',
+		'groq'   => 'https://api.groq.com/openai/v1/chat/completions',
+	];
+
+	private const MODELS = [
+		'openai' => 'gpt-4o-mini',
+		'groq'   => 'llama-3.3-70b-versatile',
+	];
+
+	private const MAX_RETRIES    = 2;
+	private const TIMEOUT        = 25;
+	private const MAX_TOKENS     = 800;
+	private const TEMPERATURE    = 0.4;
+	private const MAX_SUGGESTIONS = 10;
+
+	// ── Public API ────────────────────────────────────────────────────────────
+
+	/**
+	 * Generate SEO-friendly URL slug suggestions.
+	 *
+	 * @param array{title:string,content:string,keywords:string|array,post_id?:int} $ctx
+	 * @return string[]|\WP_Error
+	 */
+	public function generate_url_suggestions( array $ctx ): array|\WP_Error {
+		$prompt = $this->build_slug_prompt( $ctx );
+		$result = $this->dispatch( $prompt, 'slugs' );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return $this->slugs_to_urls( $result, (int) ( $ctx['post_id'] ?? 0 ) );
+	}
+
+	/**
+	 * Generate AI-powered content improvement suggestions.
+	 *
+	 * @param array $ctx
+	 * @return string[]|\WP_Error
+	 */
+	public function generate_ai_suggestions( array $ctx ): array|\WP_Error {
+		$prompt = $this->build_suggestions_prompt( $ctx );
+		return $this->dispatch( $prompt, 'suggestions' );
+	}
+
+	/**
+	 * Generate replacement suggestions for a single editable field
+	 * (post_title, post_excerpt, slug, seo_title, seo_description,
+	 * focus_keyword, alt, image_title).
+	 *
+	 * @param string $field
+	 * @param array  $ctx
+	 * @return string[]|\WP_Error
+	 */
+	public function generate_field_suggestions( string $field, array $ctx ): array|\WP_Error {
+		$prompt = $this->build_field_prompt( $field, $ctx );
+		$result = $this->dispatch( $prompt, 'field' );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		switch ( $field ) {
+			case 'slug':
+				$result = array_values( array_unique( array_filter( array_map( 'sanitize_title', $result ) ) ) );
+				break;
+
+			// Rank Math's recommended ranges. Order in-range options first so the
+			// user is offered length-valid choices that won't re-trip the SEO
+			// "too short / too long" checks in Analyze_Post::evaluate_seo_issues().
+			case 'seo_description':
+				$result = $this->prefer_length( $result, 120, 160 );
+				break;
+
+			case 'seo_title':
+				$result = $this->prefer_length( $result, 50, 60 );
+				break;
+		}
+
+		return array_slice( $result, 0, 5 );
+	}
+
+	/**
+	 * Reorder suggestions so those whose character length falls within
+	 * [$min, $max] come first; the rest follow, sorted by how close they are to
+	 * the midpoint. Nothing is dropped — the user always sees options even if the
+	 * model ignored the length rule.
+	 *
+	 * @param string[] $items
+	 * @return string[]
+	 */
+	private function prefer_length( array $items, int $min, int $max ): array {
+		$target = intdiv( $min + $max, 2 );
+
+		$scored = array_map(
+			static fn( $s ) => [ 's' => $s, 'len' => mb_strlen( (string) $s ) ],
+			$items
+		);
+
+		$in_range = array_values( array_filter( $scored, static fn( $x ) => $x['len'] >= $min && $x['len'] <= $max ) );
+		$rest     = array_values( array_filter( $scored, static fn( $x ) => $x['len'] < $min || $x['len'] > $max ) );
+
+		usort( $rest, static fn( $a, $b ) => abs( $a['len'] - $target ) <=> abs( $b['len'] - $target ) );
+
+		return array_map( static fn( $x ) => $x['s'], array_merge( $in_range, $rest ) );
+	}
+
+	// ── Dispatch ──────────────────────────────────────────────────────────────
+
+	private function dispatch( string $prompt, string $mode ): array|\WP_Error {
+		$platform = Settings::get_active_platform();
+
+		return match ( strtolower( (string) $platform ) ) {
+			'gemini' => $this->call_gemini( $prompt, $mode ),
+			'openai' => $this->call_openai( $prompt, $mode ),
+			'groq'   => $this->call_groq( $prompt, $mode ),
+			default  => new \WP_Error(
+				'unsupported_platform',
+				sprintf( 'Unsupported AI platform: %s', esc_html( $platform ) )
+			),
+		};
+	}
+
+	// ── Platform callers ──────────────────────────────────────────────────────
+
+	private function call_gemini( string $prompt, string $mode ): array|\WP_Error {
+		$key = Settings::get_active_api_key();
+		$url = add_query_arg( [ 'key' => $key ], self::ENDPOINTS['gemini'] );
+
+		return $this->post_and_parse(
+			platform: 'gemini',
+			url:      $url,
+			headers:  [ 'Content-Type' => 'application/json' ],
+			payload:  [
+				'contents'         => [ [ 'role' => 'user', 'parts' => [ [ 'text' => $prompt ] ] ] ],
+				'generationConfig' => [
+					'temperature'     => self::TEMPERATURE,
+					'maxOutputTokens' => self::MAX_TOKENS,
+				],
+			],
+			extract: static fn( array $d ) => $d['candidates'][0]['content']['parts'][0]['text'] ?? '',
+			mode:    $mode,
+		);
+	}
+
+	private function call_openai( string $prompt, string $mode ): array|\WP_Error {
+		return $this->post_and_parse(
+			platform: 'openai',
+			url:      self::ENDPOINTS['openai'],
+			headers:  [
+				'Content-Type'  => 'application/json',
+				'Authorization' => 'Bearer ' . Settings::get_active_api_key(),
+			],
+			payload:  [
+				'model'       => self::MODELS['openai'],
+				'messages'    => [
+					[ 'role' => 'system', 'content' => 'Return ONLY valid JSON. No markdown, no extra text.' ],
+					[ 'role' => 'user',   'content' => $prompt ],
+				],
+				'temperature' => self::TEMPERATURE,
+				'max_tokens'  => self::MAX_TOKENS,
+			],
+			extract: static fn( array $d ) => $d['choices'][0]['message']['content'] ?? '',
+			mode:    $mode,
+		);
+	}
+
+	private function call_groq( string $prompt, string $mode ): array|\WP_Error {
+		return $this->post_and_parse(
+			platform: 'groq',
+			url:      self::ENDPOINTS['groq'],
+			headers:  [
+				'Content-Type'  => 'application/json',
+				'Authorization' => 'Bearer ' . Settings::get_active_api_key(),
+			],
+			payload:  [
+				'model'           => self::MODELS['groq'],
+				'messages'        => [
+					[ 'role' => 'system', 'content' => 'Return ONLY valid JSON. No markdown, no extra text.' ],
+					[ 'role' => 'user',   'content' => $prompt ],
+				],
+				'temperature'     => self::TEMPERATURE,
+				'max_tokens'      => self::MAX_TOKENS,
+				'response_format' => [ 'type' => 'json_object' ],
+			],
+			extract: static fn( array $d ) => $d['choices'][0]['message']['content'] ?? '',
+			mode:    $mode,
+		);
+	}
+
+	// ── Core HTTP + retry + parse ─────────────────────────────────────────────
+
+	private function post_and_parse(
+		string   $platform,
+		string   $url,
+		array    $headers,
+		array    $payload,
+		callable $extract,
+		string   $mode
+	): array|\WP_Error {
+
+		$last_error = null;
+
+		for ( $attempt = 1; $attempt <= self::MAX_RETRIES; $attempt++ ) {
+
+			$response = wp_remote_post( $url, [
+				'timeout' => self::TIMEOUT,
+				'headers' => $headers,
+				'body'    => wp_json_encode( $payload ),
+			] );
+
+			if ( is_wp_error( $response ) ) {
+				$last_error = new \WP_Error(
+					$platform . '_http_error',
+					$response->get_error_message()
+				);
+				continue;
+			}
+
+			$code = (int) wp_remote_retrieve_response_code( $response );
+			$body = (string) wp_remote_retrieve_body( $response );
+
+			if ( $code < 200 || $code >= 300 ) {
+				$last_error = new \WP_Error(
+					$platform . '_api_error',
+					sprintf( '%s API returned HTTP %d', strtoupper( $platform ), $code ),
+					[ 'body' => substr( $body, 0, 500 ) ]
+				);
+				continue;
+			}
+
+			$data = json_decode( $body, true );
+
+			if ( ! is_array( $data ) ) {
+				$last_error = new \WP_Error( $platform . '_bad_json', 'Invalid JSON response from ' . strtoupper( $platform ) );
+				continue;
+			}
+
+			$text   = (string) $extract( $data );
+			$parsed = $this->extract_json_object( $text );
+
+			if ( $parsed === null ) {
+				$last_error = new \WP_Error( $platform . '_parse_error', 'Could not parse JSON from AI response.', [ 'raw' => substr( $text, 0, 300 ) ] );
+				continue;
+			}
+
+			$items = $parsed['suggestions'] ?? [];
+
+			if ( ! is_array( $items ) || empty( $items ) ) {
+				$last_error = new \WP_Error( $platform . '_no_suggestions', 'AI returned an empty suggestions array.' );
+				continue;
+			}
+
+			return match ( $mode ) {
+				'slugs' => $this->clean_slugs( $items ),
+				'field' => $this->clean_field( $items ),
+				default => $this->clean_suggestions( $items ),
+			};
+		}
+
+		return $last_error ?? new \WP_Error( $platform . '_failed', 'AI request failed after ' . self::MAX_RETRIES . ' attempts.' );
+	}
+
+	// ── Output cleaners ───────────────────────────────────────────────────────
+
+	private function clean_slugs( array $items ): array {
+		$slugs = array_values( array_unique( array_filter(
+			array_map( 'sanitize_title', $items )
+		) ) );
+		return array_slice( $slugs, 0, 5 );
+	}
+
+	/**
+	 * Plain-text cleaner for single-field replacement suggestions.
+	 * Unlike clean_suggestions(), strips ALL HTML — these become field values.
+	 */
+	private function clean_field( array $items ): array {
+		$clean = array_values( array_unique( array_filter( array_map( static function ( $s ) {
+			$s = wp_strip_all_tags( (string) $s );
+			$s = trim( preg_replace( '/\s+/', ' ', $s ) );
+			$s = preg_replace( '/^\s*[-•*\d.)\]]+\s*/', '', $s ); // drop list markers
+			return trim( $s, " \t\n\r\0\x0B\"'" );
+		}, $items ) ) ) );
+
+		// Keep a wider pool than the 5 we ultimately show, so callers can filter
+		// (e.g. by length for seo_description) and still surface enough options.
+		return array_slice( $clean, 0, 12 );
+	}
+
+	private function clean_suggestions( array $items ): array {
+		$allowed = [ 'strong' => [], 'em' => [], 'code' => [], 'br' => [] ];
+
+		$clean = array_values( array_filter( array_map( static function ( $s ) use ( $allowed ) {
+			$s = wp_kses( (string) $s, $allowed );
+			$s = trim( preg_replace( '/[ \t]+/', ' ', $s ) );
+			$s = preg_replace( '/\s*\n\s*/', ' ', $s );
+			$s = preg_replace( '/^\s*[-•*\d.]+\s*/', '', $s );
+			return $s;
+		}, $items ) ) );
+
+		return array_slice( $clean, 0, self::MAX_SUGGESTIONS );
+	}
+
+	// ── Prompts ───────────────────────────────────────────────────────────────
+
+	private function build_slug_prompt( array $ctx ): string {
+		$title    = wp_strip_all_tags( (string) ( $ctx['title']    ?? '' ) );
+		$content  = wp_strip_all_tags( (string) ( $ctx['content']  ?? '' ) );
+		$keywords = is_array( $ctx['keywords'] ?? null )
+			? implode( ', ', $ctx['keywords'] )
+			: (string) ( $ctx['keywords'] ?? '' );
+
+		return <<<PROMPT
+You are an SEO specialist. Generate exactly 5 SEO-friendly URL slugs for a WordPress post.
+
+STRICT OUTPUT RULES:
+- Output ONLY valid JSON: {"suggestions":["slug-one","slug-two","slug-three","slug-four","slug-five"]}
+- No markdown, no backticks, no explanations
+- Slugs: lowercase, hyphens only, no special chars, 3-8 words each, unique
+
+Post Title: {$title}
+Focus Keywords: {$keywords}
+Content excerpt: {$content}
+PROMPT;
+	}
+
+	private function build_suggestions_prompt( array $ctx ): string {
+		$title       = wp_strip_all_tags( (string) ( $ctx['title']           ?? '' ) );
+		$excerpt     = wp_strip_all_tags( (string) ( $ctx['excerpt']         ?? '' ) );
+		$seo_title   = wp_strip_all_tags( (string) ( $ctx['seo_title']       ?? '' ) );
+		$seo_desc    = wp_strip_all_tags( (string) ( $ctx['seo_description'] ?? '' ) );
+		$word_count  = (int) ( $ctx['word_count'] ?? 0 );
+		$has_img     = ! empty( $ctx['has_featured_image'] ) ? 'yes' : 'no';
+		$missing_alt = (int) ( $ctx['missing_alt_count'] ?? 0 );
+		$content     = mb_substr( wp_strip_all_tags( (string) ( $ctx['content'] ?? '' ) ), 0, 1500 );
+
+		$kw_arr = is_array( $ctx['keywords'] ?? null )
+			? $ctx['keywords']
+			: array_filter( array_map( 'trim', explode( ',', (string) ( $ctx['keywords'] ?? '' ) ) ) );
+		$keywords = implode( ', ', $kw_arr );
+
+		return <<<PROMPT
+You are a senior SEO strategist and WordPress content auditor.
+
+Analyze the post data below and return 5-10 specific, actionable improvement suggestions focused on:
+- SEO title & meta description optimization
+- Keyword usage and semantic coverage
+- Content depth, structure, and readability
+- Image optimization and accessibility
+- CTR and engagement improvements
+
+STRICT OUTPUT RULES:
+- Output ONLY valid JSON: {"suggestions":["suggestion 1","suggestion 2",...]}
+- No markdown, no backticks, no leading bullets or numbers
+- Allowed HTML inside suggestion strings ONLY: <strong>, <em>, <code>, <br>
+- Each suggestion must be a complete, specific sentence
+- No generic advice — be specific to the data provided
+
+POST DATA:
+Title: {$title}
+SEO Title: {$seo_title}
+Meta Description: {$seo_desc}
+Keywords: {$keywords}
+Excerpt: {$excerpt}
+Word Count: {$word_count}
+Has Featured Image: {$has_img}
+Images Missing Alt Text: {$missing_alt}
+Content (excerpt): {$content}
+PROMPT;
+	}
+
+	/**
+	 * Build a per-field replacement prompt. All fields share the same strict
+	 * JSON {"suggestions":[...]} contract enforced in build/dispatch.
+	 */
+	private function build_field_prompt( string $field, array $ctx ): string {
+		$title    = wp_strip_all_tags( (string) ( $ctx['title']    ?? '' ) );
+		$content  = mb_substr( wp_strip_all_tags( (string) ( $ctx['content'] ?? '' ) ), 0, 1800 );
+		$keywords = is_array( $ctx['keywords'] ?? null )
+			? implode( ', ', $ctx['keywords'] )
+			: (string) ( $ctx['keywords'] ?? '' );
+		$current  = wp_strip_all_tags( (string) ( $ctx['current'] ?? '' ) );
+
+		// Image-specific context (alt / image_title).
+		$filename = (string) ( $ctx['filename'] ?? '' );
+		$caption  = (string) ( $ctx['caption']  ?? '' );
+
+		// Over-generate for the length-sensitive SEO fields so the caller can
+		// rank/keep the ones that fall inside the recommended character range.
+		$count = in_array( $field, [ 'seo_description', 'seo_title' ], true ) ? 8 : 5;
+
+		$rules = <<<RULES
+STRICT OUTPUT RULES:
+- Output ONLY valid JSON in the exact shape: {"suggestions":["option one","option two", ...]}
+- {$count} distinct options, each plain text (no HTML, no markdown, no backticks, no numbering, no surrounding quotes)
+RULES;
+
+		$instruction = match ( $field ) {
+			'post_title'      => "Write {$count} alternative, compelling WordPress post titles (about 50–60 characters) that reflect the actual content below and include the focus keyword naturally. No clickbait.",
+			'post_excerpt'    => "Write {$count} concise post excerpts, each 1–2 sentences (~30–40 words), accurately summarizing the content below.",
+			'slug'            => "Write {$count} SEO-friendly URL slugs: lowercase, hyphen-separated, 3–7 words, focus-keyword-first, no stop-word padding.",
+			'seo_title'       => "Write {$count} SEO meta titles. Each MUST be 50–60 characters (count characters carefully — never under 50 or over 60). Start with the focus keyword, reflect the content below, and be click-worthy.",
+			'seo_description' => "Write {$count} SEO meta descriptions for this exact post.\n"
+				. "HARD LENGTH RULE: each description MUST be between 120 and 160 characters. Count the characters before answering. Anything under 120 characters is INVALID — do not output it. Aim for ~150 characters.\n"
+				. "Each must: (1) lead with or include the focus keyword, (2) accurately summarize THIS post using its title and content below (do not invent facts), (3) use active voice, (4) end with a soft call-to-action (e.g. \"Learn how\", \"Find out\", \"Get the details\"). Make them genuinely search-optimized and distinct from each other — not generic filler.",
+			'focus_keyword'   => "Suggest {$count} focus keywords or short keyphrases (2–4 words) this post genuinely targets, based on the content below.",
+			'alt'             => "Write {$count} descriptive, accessible alt-text options for the image below (max 125 characters, describe what the image shows, no \"image of\").",
+			'image_title'     => "Write {$count} short, descriptive image titles (about 50–60 characters).",
+			default           => "Write {$count} improved alternatives for this field.",
+		};
+
+		$image_block = ( $field === 'alt' || $field === 'image_title' )
+			? "Image filename: {$filename}\nImage caption: {$caption}\n"
+			: '';
+
+		return <<<PROMPT
+You are an expert WordPress SEO strategist and copy editor. Base every suggestion on the real post title and content provided — never generic boilerplate.
+{$instruction}
+
+{$rules}
+
+POST CONTEXT:
+Post Title: {$title}
+Focus Keyword(s): {$keywords}
+Current value: {$current}
+{$image_block}Post content (excerpt): {$content}
+PROMPT;
+	}
+
+	// ── JSON parsing ──────────────────────────────────────────────────────────
+
+	private function extract_json_object( string $text ): ?array {
+		$text = trim( $text );
+
+		// Strip markdown fences.
+		$text = preg_replace( '/^```(?:json)?\s*/i', '', $text );
+		$text = preg_replace( '/\s*```$/', '', $text );
+		$text = trim( $text );
+
+		// Direct parse.
+		$decoded = json_decode( $text, true );
+		if ( json_last_error() === JSON_ERROR_NONE && is_array( $decoded ) ) {
+			return $decoded;
+		}
+
+		// Grab first {...} block.
+		if ( preg_match( '/\{(?:[^{}]|(?R))*\}/s', $text, $m ) ) {
+			$decoded = json_decode( $m[0], true );
+			if ( json_last_error() === JSON_ERROR_NONE && is_array( $decoded ) ) {
+				return $decoded;
+			}
+		}
+
+		return null;
+	}
+
+	// ── Slug → URL ────────────────────────────────────────────────────────────
+
+	private function slugs_to_urls( array $slugs, int $post_id = 0 ): array {
+		$urls = [];
+
+		$rewrite_base = '';
+		if ( $post_id > 0 ) {
+			$post  = get_post( $post_id );
+			$ptype = $post ? get_post_type_object( $post->post_type ) : null;
+			$rewrite_base = $ptype->rewrite['slug'] ?? '';
+		}
+
+		foreach ( $slugs as $slug ) {
+			$slug = sanitize_title( (string) $slug );
+			if ( $slug === '' ) continue;
+
+			$urls[] = $rewrite_base
+				? home_url( '/' . trim( $rewrite_base, '/' ) . '/' . $slug . '/' )
+				: home_url( '/' . $slug . '/' );
+		}
+
+		return array_values( array_unique( $urls ) );
+	}
 }

@@ -8,12 +8,10 @@ export default defineConfig({
   base: '/wp-content/plugins/postanalyzer/build/',
   plugins: [react(), svgr(), tailwindcss()],
   root: 'src',
-  optimizeDeps: {
-    include: ['jquery', 'select2'], // pre-bundle jQuery and Select2
-  },
   build: {
     outDir: '../build',
     emptyOutDir: true,
+    sourcemap: false,
     rollupOptions: {
       input: path.resolve(__dirname, 'src/main.jsx'),
       output: {
@@ -22,5 +20,9 @@ export default defineConfig({
         assetFileNames: '[name].[ext]',
       },
     },
+  },
+  define: {
+    // Strip React dev warnings in production
+    'process.env.NODE_ENV': '"production"',
   },
 });

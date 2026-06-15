@@ -2,160 +2,230 @@
 
 namespace PostAnalyzer;
 
-if (! defined('ABSPATH')) {
-    exit;
-}
+defined( 'ABSPATH' ) || exit;
 
-class Plugin
-{
-    public const SLUG = 'postanalyzer';
-    private static ?self $instance = null;
-    private string $plugin_dir;
-    private string $plugin_url;
-    private string $build_dir;
-    private int $version;
+/**
+ * Core plugin singleton.
+ *
+ * Responsible for:
+ *  - Admin menu & admin-bar integration
+ *  - Asset enqueueing (build files with cache-busting)
+ *  - REST endpoint registration
+ *  - Activation / deactivation hooks
+ *
+ * @package PostAnalyzer
+ * @since   2.0.0
+ */
+final class Plugin {
 
-    private function __construct()
-    {
-        $this->plugin_dir = plugin_dir_path(__DIR__);
-        $this->plugin_url = plugin_dir_url(__DIR__);
-        $this->build_dir  = $this->plugin_dir . 'build/';
-        $this->version    = $this->get_build_version();
+	/** @var self|null */
+	private static ?self $instance = null;
 
-        add_action('admin_menu', [$this, 'register_admin_page']);
-        add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
-        add_action('init', [$this, 'load_endpoints']);
-        add_action('admin_bar_menu', [$this, 'add_analyze_post_admin_bar'], 100);
-    }
+	// ── Lifecycle ────────────────────────────────────────────────────────────
 
-    public static function instance(): self
-    {
-        if (null === self::$instance) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
+	private function __construct() {
+		$this->hooks();
+	}
 
-    private function get_build_version(): int
-    {
-        $js = $this->build_dir . 'index.js';
-        $css = $this->build_dir . 'main.css';
-        $v1 = file_exists($js) ? filemtime($js) : time();
-        $v2 = file_exists($css) ? filemtime($css) : $v1;
-        return (int) max($v1, $v2);
-    }
+	public static function instance(): self {
+		if ( null === self::$instance ) {
+			self::$instance = new self();
+		}
+		return self::$instance;
+	}
 
-    public function register_admin_page(): void
-    {
-        add_menu_page(
-            __('Post Analyzer', 'postanalyzer'),
-            __('Post Analyzer', 'postanalyzer'),
-            'edit_posts',
-            self::SLUG,
-            [$this, 'render_admin_page'],
-            'dashicons-search',
-            56
-        );
-    }
+	private function __clone() {}
+	public function __wakeup() {}
 
-    public function render_admin_page(): void
-    {
-        if (! current_user_can('edit_posts')) {
-            wp_die(esc_html__('Insufficient permissions', 'postanalyzer'));
-        }
-        echo '<div class="wrap"><div id="postanalyzer-root" aria-live="polite"></div></div>';
-    }
+	// ── Hooks ────────────────────────────────────────────────────────────────
 
-    public function enqueue_assets($hook = ''): void
-    {
-        // Only enqueue on our admin page
-        if ($hook !== 'toplevel_page_' . self::SLUG) {
-            return;
-        }
+	private function hooks(): void {
+		add_action( 'admin_menu',            [ $this, 'register_admin_menu' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_assets' ] );
+		add_action( 'admin_bar_menu',        [ $this, 'add_admin_bar_node' ], 100 );
+		add_action( 'init',                  [ $this, 'load_textdomain' ] );
+		add_action( 'init',                  [ $this, 'load_endpoints' ] );
+	}
 
-        $js_file  = $this->build_dir . 'index.js';
-        $css_file = $this->build_dir . 'main.css';
+	// ── Admin menu ───────────────────────────────────────────────────────────
 
-        if (file_exists($css_file)) {
-            wp_enqueue_style('postanalyzer-admin', $this->plugin_url . 'build/main.css', [], $this->version);
-        }
+	public function register_admin_menu(): void {
+		add_menu_page(
+			__( 'Post Analyzer', 'postanalyzer' ),
+			__( 'Post Analyzer', 'postanalyzer' ),
+			'edit_posts',
+			POSTANALYZER_SLUG,
+			[ $this, 'render_admin_page' ],
+			'dashicons-search',
+			56
+		);
+	}
 
-        if (file_exists($js_file)) {
-            wp_enqueue_script(
-                'postanalyzer-admin',
-                $this->plugin_url . 'build/index.js',
-                ['wp-element'],
-                $this->version,
-                true
-            );
+	public function render_admin_page(): void {
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'postanalyzer' ) );
+		}
+		echo '<div class="wrap"><div id="postanalyzer-root" aria-live="polite"></div></div>';
+	}
 
-            // provide runtime data to the React app
-            wp_localize_script(
-                'postanalyzer-admin',
-                'postanalyzerWP',
-                [
-                    'restUrl' => esc_url_raw(rest_url('postanalyzer/v1/')),
-                    'nonce'   => wp_create_nonce('wp_rest'),
-                    'siteUrl' => esc_url_raw(get_site_url()),
-                    'user_level' => current_user_can('manage_options') ? 'admin' : 'editor',
-                ]
-            );
-        } else {
-            // helpful debug: show admin notice if build missing
-            add_action('admin_notices', function () {
-                echo '<div class="notice notice-error"><p>PostAnalyzer: build/index.js not found. Run <code>npm run build</code> in plugin directory.</p></div>';
-            });
-        }
-    }
+	// ── Assets ───────────────────────────────────────────────────────────────
 
+	public function enqueue_assets( string $hook ): void {
+		if ( $hook !== 'toplevel_page_' . POSTANALYZER_SLUG ) {
+			return;
+		}
 
-    public function add_analyze_post_admin_bar($wp_admin_bar)
-    {
-        if (!current_user_can('manage_options')) {
-            return;
-        }
+		$build_dir = POSTANALYZER_DIR . 'build/';
+		$build_url = POSTANALYZER_URL . 'build/';
+		$ver       = $this->build_version( $build_dir );
 
-        $args = [
-            'id'    => 'analyze_post',
-            'title' => 'Analyze Post',
-            'href'  => admin_url('admin.php?page=postanalyzer'),
-            'meta'  => [
-                'class' => 'analyze-post-admin-bar',
-                'title' => 'Analyze Post Page'
-            ]
-        ];
+		$css = $build_dir . 'main.css';
+		$js  = $build_dir . 'index.js';
 
-        $wp_admin_bar->add_node($args);
-    }
+		if ( file_exists( $css ) ) {
+			wp_enqueue_style(
+				'postanalyzer-admin',
+				$build_url . 'main.css',
+				[],
+				$ver
+			);
+		}
 
+		if ( file_exists( $js ) ) {
+			wp_enqueue_script(
+				'postanalyzer-admin',
+				$build_url . 'index.js',
+				[ 'wp-element' ],
+				$ver,
+				true
+			);
 
-    public function load_endpoints(): void
-    {
-        $classes = [
-            \PostAnalyzer\API\Analyze_Post::class,
-            \PostAnalyzer\API\Posts::class,
-            \PostAnalyzer\API\Settings::class,
-            \PostAnalyzer\API\Users::class,
-        ];
+			wp_localize_script(
+				'postanalyzer-admin',
+				'postanalyzerWP',
+				[
+					'restUrl'     => esc_url_raw( rest_url( 'postanalyzer/v1/' ) ),
+					'nonce'       => wp_create_nonce( 'wp_rest' ),
+					'siteUrl'     => esc_url_raw( get_site_url() ),
+					'version'     => POSTANALYZER_VERSION,
+					'user_level'  => current_user_can( 'manage_options' ) ? 'admin' : 'editor',
+					'postTypes'   => $this->get_analyzable_post_types(),
+				]
+			);
+		} else {
+			add_action( 'admin_notices', static function () {
+				echo '<div class="notice notice-error"><p>'
+				     . wp_kses(
+					     __( 'PostAnalyzer: <code>build/index.js</code> not found. Run <code>npm run build</code> in the plugin directory.', 'postanalyzer' ),
+					     [ 'code' => [] ]
+				     )
+				     . '</p></div>';
+			} );
+		}
+	}
 
-        foreach ($classes as $class) {
-            if (class_exists($class)) {
-                new $class();
-            }
-        }
-    }
+	// ── Admin bar ────────────────────────────────────────────────────────────
 
-    // helper for API output
-    public function recursive_html_entity_decode($data)
-    {
-        if (is_array($data)) {
-            return array_map([$this, 'recursive_html_entity_decode'], $data);
-        } elseif (is_string($data)) {
-            return html_entity_decode($data, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        }
-        return $data;
-    }
+	public function add_admin_bar_node( \WP_Admin_Bar $bar ): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
 
-    private function __clone() {}
-    public function __wakeup() {}
+		$bar->add_node( [
+			'id'    => 'postanalyzer_analyze',
+			'title' => '<span class="ab-icon dashicons dashicons-search" style="top:2px"></span>'
+			           . __( 'Analyze Post', 'postanalyzer' ),
+			'href'  => admin_url( 'admin.php?page=' . POSTANALYZER_SLUG ),
+			'meta'  => [
+				'class' => 'postanalyzer-adminbar-node',
+				'title' => __( 'Open Post Analyzer', 'postanalyzer' ),
+			],
+		] );
+	}
+
+	// ── REST endpoints ───────────────────────────────────────────────────────
+
+	public function load_endpoints(): void {
+		$endpoints = [
+			\PostAnalyzer\API\Analyze_Post::class,
+			\PostAnalyzer\API\Edit_Field::class,
+			\PostAnalyzer\API\Posts::class,
+			\PostAnalyzer\API\Settings::class,
+			\PostAnalyzer\API\Users::class,
+		];
+
+		foreach ( $endpoints as $class ) {
+			if ( class_exists( $class ) ) {
+				new $class();
+			}
+		}
+	}
+
+	// ── i18n ─────────────────────────────────────────────────────────────────
+
+	public function load_textdomain(): void {
+		load_plugin_textdomain(
+			'postanalyzer',
+			false,
+			dirname( plugin_basename( POSTANALYZER_FILE ) ) . '/languages'
+		);
+	}
+
+	// ── Activation / Deactivation ─────────────────────────────────────────────
+
+	public static function activate(): void {
+		// Future: run DB migrations, set default options, flush rewrite rules.
+		if ( ! get_option( 'postanalyzer_settings' ) ) {
+			update_option( 'postanalyzer_settings', wp_json_encode( [
+				'ai_platform' => 'groq',
+				'api_keys'    => [],
+				'author_id'   => 0,
+			] ), false );
+		}
+		flush_rewrite_rules();
+	}
+
+	public static function deactivate(): void {
+		flush_rewrite_rules();
+	}
+
+	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	/**
+	 * Returns a cache-busting version string derived from build file mtimes.
+	 */
+	private function build_version( string $build_dir ): string {
+		$js  = $build_dir . 'index.js';
+		$css = $build_dir . 'main.css';
+		$v   = max(
+			file_exists( $js )  ? (int) filemtime( $js )  : 0,
+			file_exists( $css ) ? (int) filemtime( $css ) : 0
+		);
+		return $v > 0 ? (string) $v : POSTANALYZER_VERSION;
+	}
+
+	/**
+	 * Returns post types that can be analyzed (filterable by 3rd-party plugins).
+	 *
+	 * @return string[]
+	 */
+	private function get_analyzable_post_types(): array {
+		return (array) apply_filters( 'postanalyzer_post_types', [ 'post', 'page' ] );
+	}
+
+	/**
+	 * Recursively decode HTML entities in API response data.
+	 *
+	 * @param mixed $data
+	 * @return mixed
+	 */
+	public static function recursive_html_entity_decode( mixed $data ): mixed {
+		if ( is_array( $data ) ) {
+			return array_map( [ self::class, 'recursive_html_entity_decode' ], $data );
+		}
+		if ( is_string( $data ) ) {
+			return html_entity_decode( $data, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		}
+		return $data;
+	}
 }

@@ -1,15 +1,33 @@
-import { useEffect } from "react";
-import { Fancybox } from "@fancyapps/ui/dist/fancybox/";
-import "@fancyapps/ui/dist/fancybox/fancybox.css";
+import { useEffect } from 'react';
+import { Fancybox } from '@fancyapps/ui';
+import '@fancyapps/ui/dist/fancybox/fancybox.css';
 
-export default function useFancybox(rootRef, options = {}) {
-    useEffect(() => {
-        if (rootRef?.current) {
-            // Bind Fancybox once for both groups
-            Fancybox.bind(rootRef.current.querySelectorAll('[data-fancybox="featured"]'), options);
-            Fancybox.bind(rootRef.current.querySelectorAll('[data-fancybox="attached"]'), options);
+/**
+ * Binds Fancybox to a container ref.
+ * Cleans up properly on unmount.
+ */
+export default function useFancybox(containerRef) {
+  useEffect(() => {
+    const container = containerRef?.current;
+    if (!container) return;
 
-            return () => Fancybox.unbind(rootRef.current);
-        }
-    }, [rootRef, options]);
+    Fancybox.bind(container, '[data-fancybox]', {
+      animated: true,
+      showClass: 'fancybox-fadeIn',
+      hideClass: 'fancybox-fadeOut',
+      Images: { zoom: true },
+      Toolbar: {
+        display: {
+          left:  ['infobar'],
+          middle: [],
+          right: ['download', 'close'],
+        },
+      },
+    });
+
+    return () => {
+      Fancybox.unbind(container);
+      Fancybox.close();
+    };
+  }, [containerRef]);
 }

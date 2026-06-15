@@ -1,15 +1,12 @@
-import ImageMeta from './../ImageMeta';
+import ImageMeta from '../ImageMeta';
 
-export default function FeaturedImage({ title, featured_image }) {
-    if (!featured_image) return null;
+export default function FeaturedImage({ featured_image, postId, onSaved }) {
+  if (!featured_image) return null;
 
-    return (
-        <>
-            <section className="card">
-                <h3 className="card-title">{title}</h3>
-                {featured_image && <ImageMeta img={featured_image} featured={true} />}
-                {!featured_image && <div className="text-sm text-gray-600">No featured image set.</div>}
-            </section>
-        </>
-    );
+  return (
+    <section className="card card-full">
+      <h3 className="card-title">Featured Image</h3>
+      <ImageMeta img={featured_image} featured postId={postId} onSaved={onSaved} />
+    </section>
+  );
 }

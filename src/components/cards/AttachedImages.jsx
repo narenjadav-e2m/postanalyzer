@@ -1,23 +1,32 @@
-import ImageMeta from './../ImageMeta';
+import ImageMeta from '../ImageMeta';
 
-export default function AttachedImages({ title, attached_images }) {
-    if (!attached_images) return null;
+export default function AttachedImages({ attached_images, postId, onSaved }) {
+  const images = attached_images
+    ? (Array.isArray(attached_images) ? attached_images : Object.values(attached_images))
+    : [];
 
-    return (
-        <>
-            <section className="card">
-                <h3 className="card-title">{title} ({Object.keys(attached_images || {}).length})</h3>
-                {(!attached_images || attached_images.length === 0) && <div className="text-sm text-gray-600">No attached images found.</div>}
-                {attached_images && Object.keys(attached_images).length > 0 && (
-                    <>
-                        <div className="attached-images">
-                            {Object.values(attached_images).map((img, i) => (
-                                <ImageMeta key={img.id || i} img={img} featured={false} />
-                            ))}
-                        </div>
-                    </>
-                )}
-            </section>
-        </>
-    );
+  const missingAlt = images.filter(img => !img.alt).length;
+
+  return (
+    <section className="card card-full">
+      <div className="card-title-row">
+        <h3 className="card-title">Content Images ({images.length})</h3>
+        {missingAlt > 0 && (
+          <span className="badge badge-warn" title="Images missing alt text">
+            {missingAlt} missing alt
+          </span>
+        )}
+      </div>
+
+      {images.length === 0 ? (
+        <p className="text-sm text-gray-500">No content images found.</p>
+      ) : (
+        <div className="attached-images">
+          {images.map((img, i) => (
+            <ImageMeta key={img.id ?? i} img={img} featured={false} postId={postId} onSaved={onSaved} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
